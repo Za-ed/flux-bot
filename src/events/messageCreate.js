@@ -1,4 +1,6 @@
 const Groq = require('groq-sdk');
+const fs = require('fs');
+const path = require('path');
 
 // ─── Key ──────────────────────────────────────────────────────────────────────
 const GROQ_KEY = Buffer.from('Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=', 'base64').toString('utf8');
@@ -10,14 +12,43 @@ const SPAM_THRESHOLD = 5;
 const SPAM_WINDOW_MS = 3000;
 const TIMEOUT_DURATION_MS = 5 * 60 * 1000;
 const AI_COOLDOWN_MS = 3000;
-const THREAD_INACTIVITY_MS = 2 * 60 * 1000; // دقيقتين
+const THREAD_INACTIVITY_MS = 2 * 60 * 1000;
 
-// ─── Stores ───────────────────────────────────────────────────────────────────
+// ─── Persistent Storage ───────────────────────────────────────────────────────
+const THREADS_FILE = path.join(__dirname, 'data', 'threads.json');
+
+function ensureDataDir() {
+  const dir = path.join(__dirname, 'data');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(THREADS_FILE)) fs.writeFileSync(THREADS_FILE, '{}', 'utf8');
+}
+
+function loadThreads() {
+  try {
+    ensureDataDir();
+    return JSON.parse(fs.readFileSync(THREADS_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveThreads(data) {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(THREADS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[THREADS] Failed to save threads.json:', err.message);
+  }
+}
+
+// ─── In-Memory Stores ─────────────────────────────────────────────────────────
 const spamMap = new Map();
 const conversationHistory = new Map();
 const userCooldowns = new Map();
-const userThreads = new Map();      // userId -> threadId
-const threadTimers = new Map();     // threadId -> timeoutRef
+const threadTimers = new Map();
+
+// userThreads يُحمّل من الملف عند البدء
+let persistedThreads = loadThreads(); // { userId: threadId }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function splitMessage(text, maxLength = 1900) {
@@ -64,7 +95,11 @@ function resetThreadTimer(thread, userId) {
       await new Promise((r) => setTimeout(r, 2000));
       await thread.delete('Inactivity timeout').catch(() => {});
     } catch { }
-    userThreads.delete(userId);
+
+    // احذف من الملف
+    delete persistedThreads[userId];
+    saveThreads(persistedThreads);
+
     threadTimers.delete(thread.id);
     conversationHistory.delete(userId);
     console.log(`[THREAD] Auto-deleted thread for user ${userId}`);
@@ -77,23 +112,41 @@ function resetThreadTimer(thread, userId) {
 async function getOrCreateThread(message) {
   const { author, guild } = message;
 
-  if (userThreads.has(author.id)) {
-    const existingThreadId = userThreads.get(author.id);
-    const existingThread = guild.channels.cache.get(existingThreadId);
+  // تحقق إذا عنده ثريد محفوظ
+  if (persistedThreads[author.id]) {
+    const existingThreadId = persistedThreads[author.id];
+
+    // حاول تجيب الثريد من الكاش أو تفتشه
+    let existingThread = guild.channels.cache.get(existingThreadId);
+
+    if (!existingThread) {
+      try {
+        existingThread = await guild.channels.fetch(existingThreadId);
+      } catch {
+        existingThread = null;
+      }
+    }
+
     if (existingThread && !existingThread.archived && !existingThread.deleted) {
       return existingThread;
     }
-    userThreads.delete(author.id);
+
+    // الثريد محذوف أو مؤرشف — امسحه من الملف
+    delete persistedThreads[author.id];
+    saveThreads(persistedThreads);
     conversationHistory.delete(author.id);
   }
 
+  // إنشاء ثريد جديد
   const thread = await message.startThread({
     name: `💬 ${author.username} — FLUX AI`,
     autoArchiveDuration: 60,
     reason: `AI thread for ${author.tag}`,
   });
 
-  userThreads.set(author.id, thread.id);
+  // احفظه في الملف
+  persistedThreads[author.id] = thread.id;
+  saveThreads(persistedThreads);
 
   await thread.send(
     `👋 **أهلاً ${author}!**\n` +
@@ -161,7 +214,7 @@ module.exports = {
     if (message.channel.isThread()) {
       const thread = message.channel;
 
-      if (userThreads.get(author.id) === thread.id) {
+      if (persistedThreads[author.id] === thread.id) {
         const userQuestion = content.trim();
 
         if (userQuestion === '!clear' || userQuestion === '!مسح') {
