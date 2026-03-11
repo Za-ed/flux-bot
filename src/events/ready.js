@@ -1,5 +1,4 @@
-const { ActivityType }           = require('discord.js');
-const { scheduleDailyReport }    = require('../utils/dailyReport');
+const { ActivityType } = require('discord.js');
 
 module.exports = {
   name: 'ready',
@@ -14,8 +13,16 @@ module.exports = {
       status: 'online',
     });
 
-    // ✅ تشغيل التقرير اليومي — كان ناقصاً تماماً
-    scheduleDailyReport(client);
-    console.log('[READY] 📊 Daily report scheduler started.');
+    // ✅ Lazy require داخل execute — يتجنب circular dependency أثناء التحميل
+    try {
+      const { scheduleDailyReport } = require('../utils/dailyReport');
+      if (typeof scheduleDailyReport !== 'function') {
+        throw new Error('scheduleDailyReport ليست دالة — تحقق من dailyReport.js');
+      }
+      scheduleDailyReport(client);
+      console.log('[READY] 📊 Daily report scheduler started.');
+    } catch (err) {
+      console.error('[READY] ⚠️ فشل تشغيل التقرير اليومي:', err.message);
+    }
   },
 };
