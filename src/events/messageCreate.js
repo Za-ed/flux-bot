@@ -11,7 +11,14 @@ const TIMEOUT_DURATION_MS = 5 * 60 * 1000;
 const spamMap = new Map();
 
 // ─── Groq Client ─────────────────────────────────────────────────────────────
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+let groq = null;
+
+function getGroqClient() {
+  if (!groq) {
+    groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  }
+  return groq;
+}
 
 // ─── Helper: Split long messages ─────────────────────────────────────────────
 function splitMessage(text, maxLength = 1900) {
