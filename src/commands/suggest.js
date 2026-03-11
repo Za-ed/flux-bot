@@ -7,8 +7,6 @@ const {
   ButtonStyle,
 } = require('discord.js');
 
-const SUGGEST_CHANNEL = 'اقتراحات'; // اسم قناة الاقتراحات عندك
-
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('suggest')
@@ -28,7 +26,9 @@ module.exports = {
 
     // ابحث عن قناة الاقتراحات
     const suggestChannel = interaction.guild.channels.cache.find(
-      (c) => c.name.toLowerCase().includes('اقتراح') || c.name.toLowerCase().includes('suggest')
+      (c) =>
+        c.name.toLowerCase().includes('اقتراح') ||
+        c.name.toLowerCase().includes('suggest')
     );
 
     if (!suggestChannel) {
@@ -37,21 +37,27 @@ module.exports = {
       });
     }
 
-    // ── بناء الـ Embed ────────────────────────────────────────────────────────
+    // ✅ التحقق من صلاحية الإرسال في القناة
+    if (!suggestChannel.permissionsFor(interaction.guild.members.me).has('SendMessages')) {
+      return interaction.editReply({
+        content: `❌ ما أقدر أرسل في ${suggestChannel} — تحقق من صلاحيات البوت.`,
+      });
+    }
+
     const embed = new EmbedBuilder()
       .setTitle('💡  اقتراح جديد')
       .setDescription(`> ${idea}`)
       .addFields(
-        { name: '👤  من',       value: `${interaction.user} (${interaction.user.tag})`, inline: true },
-        { name: '📅  التاريخ',  value: `<t:${Math.floor(Date.now() / 1000)}:F>`,        inline: true },
-        { name: '📊  التصويت', value: '✅ 0  |  ❌ 0',                                   inline: false },
+        { name: '👤  من',       value: `${interaction.user} (${interaction.user.tag})`,  inline: true },
+        { name: '📅  التاريخ',  value: `<t:${Math.floor(Date.now() / 1000)}:F>`,         inline: true },
+        // ✅ العداد يبدأ من صفر — يتحدث عبر button handler في index.js
+        { name: '📊  التصويت', value: '✅ 0  |  ❌ 0  |  🤔 0',                          inline: false },
       )
       .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
       .setColor(0xf1c40f)
       .setFooter({ text: 'FLUX • IO  |  نظام الاقتراحات' })
       .setTimestamp();
 
-    // ── أزرار التصويت ─────────────────────────────────────────────────────────
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('suggest_yes')
@@ -70,11 +76,8 @@ module.exports = {
         .setStyle(ButtonStyle.Secondary),
     );
 
-    const msg = await suggestChannel.send({ embeds: [embed], components: [row] });
-
-    // أضف ريأكشنز أيضاً
-    await msg.react('✅').catch(() => {});
-    await msg.react('❌').catch(() => {});
+    // ✅ فقط أزرار — بدون reactions مزدوجة
+    await suggestChannel.send({ embeds: [embed], components: [row] });
 
     await interaction.editReply({
       content: `✅ تم إرسال اقتراحك إلى ${suggestChannel} بنجاح! 🎉`,

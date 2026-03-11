@@ -25,15 +25,16 @@ module.exports = {
     const currentXp = leveling.getXpInCurrentLevel(userData.xp);
     const neededXp  = leveling.xpForLevel(level + 1);
 
-    const lb        = leveling.getLeaderboard(guildId, 100);
-    const rank      = lb.findIndex((e) => e.userId === user.id) + 1;
+    const lb   = leveling.getLeaderboard(guildId, 100);
+    const rank = lb.findIndex((e) => e.userId === user.id) + 1;
 
     const voiceMins = voiceXP.getTotalMinutes(guildId, user.id);
     const badges    = formatBadges(guildId, user.id);
 
-    const accentColor = target.displayHexColor !== '#000000'
-      ? target.displayHexColor
-      : '#1e90ff';
+    // ✅ تحقق أدق من اللون — يتجاهل الأسود AND الأبيض كـ defaults
+    const hexColor = target.displayHexColor;
+    const isDefaultColor = !hexColor || hexColor === '#000000' || hexColor === '#ffffff';
+    const accentColor = isDefaultColor ? '#1e90ff' : hexColor;
 
     try {
       const buffer = await generateRankCard({
@@ -43,7 +44,7 @@ module.exports = {
         currentXp,
         neededXp,
         totalXp:      userData.xp,
-        rank,
+        rank:         rank || '—',
         voiceMinutes: voiceMins,
         badges,
         accentColor,
@@ -54,8 +55,11 @@ module.exports = {
 
     } catch (err) {
       console.error('[RANK] Canvas error:', err.message);
+      // ✅ Fallback نظيف
       await interaction.editReply({
-        content: `📊 **${user.username}** — المستوى **${level}** | ${userData.xp} XP | #${rank}`,
+        content:
+          `📊 **${user.username}**\n` +
+          `المستوى: **${level}** | XP: **${userData.xp}** | الترتيب: **#${rank || '—'}**`,
       });
     }
   },

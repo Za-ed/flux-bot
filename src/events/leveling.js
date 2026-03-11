@@ -1,15 +1,18 @@
-const fs = require('fs');
+// ─── leveling.js ──────────────────────────────────────────────────────────────
+// ✅ ملف utility فقط — لا يُصدّر name/execute
+// XP من الرسائل يُعالَج في messageCreate.js
+
+const fs   = require('fs');
 const path = require('path');
-const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const { EmbedBuilder } = require('discord.js');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const XP_PER_MESSAGE    = { min: 15, max: 25 };
-const XP_COOLDOWN_MS    = 60 * 1000; // دقيقة بين كل رسالة تكسب XP
-const LEVEL_UP_CHANNEL  = 'general'; // اسم القناة اللي تظهر فيها رسائل الترقية
-const IGNORED_CHANNELS  = ['bot-commands', 'spam']; // قنوات ما تعطي XP
+const XP_PER_MESSAGE   = { min: 15, max: 25 };
+const XP_COOLDOWN_MS   = 60 * 1000;
+const LEVEL_UP_CHANNEL = 'general';
+const IGNORED_CHANNELS = ['bot-commands', 'spam'];
 
 // ─── XP Formula ───────────────────────────────────────────────────────────────
-// XP المطلوب للمستوى N = 100 * N^1.5
 function xpForLevel(level) {
   return Math.floor(100 * Math.pow(level, 1.5));
 }
@@ -21,7 +24,7 @@ function getTotalXpForLevel(level) {
 }
 
 function getLevelFromXp(totalXp) {
-  let level = 0;
+  let level   = 0;
   let xpNeeded = 0;
   while (true) {
     xpNeeded += xpForLevel(level + 1);
@@ -32,14 +35,14 @@ function getLevelFromXp(totalXp) {
 }
 
 function getXpInCurrentLevel(totalXp) {
-  let level = getLevelFromXp(totalXp);
-  let xpUsed = getTotalXpForLevel(level);
+  const level  = getLevelFromXp(totalXp);
+  const xpUsed = getTotalXpForLevel(level);
   return totalXp - xpUsed;
 }
 
 // ─── Persistent Storage ───────────────────────────────────────────────────────
-const DATA_DIR  = path.join(__dirname, '..', 'data');
-const XP_FILE   = path.join(DATA_DIR, 'xp.json');
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const XP_FILE  = path.join(DATA_DIR, 'xp.json');
 
 function ensureFile() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -50,9 +53,7 @@ function loadXP() {
   try {
     ensureFile();
     return JSON.parse(fs.readFileSync(XP_FILE, 'utf8'));
-  } catch {
-    return {};
-  }
+  } catch { return {}; }
 }
 
 function saveXP(data) {
@@ -65,8 +66,8 @@ function saveXP(data) {
 }
 
 // ─── In-Memory ────────────────────────────────────────────────────────────────
-let xpData     = loadXP();        // { guildId: { userId: { xp, lastMessage } } }
-const cooldowns = new Map();       // userId -> timestamp
+let xpData     = loadXP();
+const cooldowns = new Map(); // `${guildId}-${userId}` -> timestamp
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function getGuildData(guildId) {
@@ -88,65 +89,89 @@ function getLeaderboard(guildId, limit = 10) {
     .slice(0, limit);
 }
 
-// ─── Module Export ────────────────────────────────────────────────────────────
+// ✅ دالة مركزية لإضافة XP — تستخدمها voiceXP و gamingCorner بدل الكتابة المباشرة
+function addXP(guildId, userId, amount) {
+  const userData = getUserData(guildId, userId);
+  const oldLevel = getLevelFromXp(userData.xp);
+  userData.xp   += amount;
+  xpData[guildId][userId] = userData;
+  saveXP(xpData);
+  const newLevel = getLevelFromXp(userData.xp);
+  return { oldLevel, newLevel, totalXp: userData.xp };
+}
+
+// ─── XP من الرسائل (يُستدعى من messageCreate.js) ─────────────────────────────
+async function handleMessageXP(message) {
+  if (message.author.bot) return;
+  if (!message.guild)     return;
+  if (IGNORED_CHANNELS.includes(message.channel.name)) return;
+
+  const { author, guild, channel } = message;
+  const now = Date.now();
+
+  const cooldownKey = `${guild.id}-${author.id}`;
+  const lastGain    = cooldowns.get(cooldownKey) || 0;
+  if (now - lastGain < XP_COOLDOWN_MS) return;
+  cooldowns.set(cooldownKey, now);
+
+  const gainedXp = Math.floor(
+    Math.random() * (XP_PER_MESSAGE.max - XP_PER_MESSAGE.min + 1)
+  ) + XP_PER_MESSAGE.min;
+
+  const { oldLevel, newLevel } = addXP(guild.id, author.id, gainedXp);
+
+  // Level Up
+  if (newLevel > oldLevel) {
+    console.log(`[XP] ${author.tag} ارتقى إلى المستوى ${newLevel}`);
+
+    const levelUpChannel =
+      guild.channels.cache.find((c) => c.name === LEVEL_UP_CHANNEL) || channel;
+
+    // تحقق من شارات المستوى
+    try {
+      const { checkLevelBadges } = require('../utils/badges');
+      const newBadges = checkLevelBadges(guild.id, author.id, newLevel);
+      if (newBadges.length > 0) {
+        const badgeText = newBadges.map((b) => `${b.emoji} **${b.name}**`).join(', ');
+        await levelUpChannel.send(`🏅 ${author} كسب شارة جديدة: ${badgeText}`).catch(() => {});
+      }
+    } catch {}
+
+    const userData = getUserData(guild.id, author.id);
+    const embed = new EmbedBuilder()
+      .setTitle('🎉  ترقية مستوى!')
+      .setDescription(`مبروك ${author}! وصلت للمستوى **${newLevel}** 🚀`)
+      .addFields(
+        { name: '📊 المستوى الجديد', value: `${newLevel}`,               inline: true },
+        { name: '⭐ إجمالي XP',      value: `${userData.xp} XP`,         inline: true },
+        { name: '📈 XP التالي',       value: `${xpForLevel(newLevel + 1)} XP`, inline: true }
+      )
+      .setThumbnail(author.displayAvatarURL({ dynamic: true }))
+      .setColor(0xf1c40f)
+      .setFooter({ text: 'FLUX • IO  |  نظام المستويات' })
+      .setTimestamp();
+
+    await levelUpChannel.send({ content: `${author}`, embeds: [embed] }).catch(() => {});
+  }
+}
+
+// ─── Exports ──────────────────────────────────────────────────────────────────
+// ✅ لا يوجد name/execute — لا يُسجَّل كـ event
 module.exports = {
-  name: 'messageCreate',
-  once: false,
-
-  async execute(message) {
-    if (message.author.bot) return;
-    if (!message.guild)     return;
-    if (IGNORED_CHANNELS.includes(message.channel.name)) return;
-
-    const { author, guild, channel } = message;
-    const now = Date.now();
-
-    // ── Cooldown ──────────────────────────────────────────────────────────
-    const lastGain = cooldowns.get(`${guild.id}-${author.id}`) || 0;
-    if (now - lastGain < XP_COOLDOWN_MS) return;
-    cooldowns.set(`${guild.id}-${author.id}`, now);
-
-    // ── إضافة XP ──────────────────────────────────────────────────────────
-    const userData  = getUserData(guild.id, author.id);
-    const oldLevel  = getLevelFromXp(userData.xp);
-    const gainedXp  = Math.floor(Math.random() * (XP_PER_MESSAGE.max - XP_PER_MESSAGE.min + 1)) + XP_PER_MESSAGE.min;
-
-    userData.xp          += gainedXp;
-    userData.lastMessage  = now;
-    xpData[guild.id][author.id] = userData;
-    saveXP(xpData);
-
-    const newLevel = getLevelFromXp(userData.xp);
-
-    // ── Level Up ──────────────────────────────────────────────────────────
-    if (newLevel > oldLevel) {
-      console.log(`[XP] ${author.tag} ارتقى إلى المستوى ${newLevel}`);
-
-      const levelUpChannel =
-        guild.channels.cache.find((c) => c.name === LEVEL_UP_CHANNEL) || channel;
-
-      const embed = new EmbedBuilder()
-        .setTitle('🎉  ترقية مستوى!')
-        .setDescription(`مبروك ${author}! وصلت للمستوى **${newLevel}** 🚀`)
-        .addFields(
-          { name: '📊 المستوى الجديد', value: `${newLevel}`,          inline: true },
-          { name: '⭐ إجمالي XP',      value: `${userData.xp} XP`,    inline: true },
-          { name: '📈 XP التالي',       value: `${xpForLevel(newLevel + 1)} XP`, inline: true }
-        )
-        .setThumbnail(author.displayAvatarURL({ dynamic: true }))
-        .setColor(0xf1c40f)
-        .setFooter({ text: 'FLUX • IO  |  نظام المستويات' })
-        .setTimestamp();
-
-      await levelUpChannel.send({ content: `${author}`, embeds: [embed] }).catch(() => {});
-    }
-  },
-
-  // ── دوال مساعدة تُستخدم في الأوامر ──────────────────────────────────────
+  // Utility functions
   getLevelFromXp,
   getXpInCurrentLevel,
   xpForLevel,
   getLeaderboard,
   getUserData,
+  addXP,
   loadXP,
+  saveXP,
+
+  // Called from messageCreate.js
+  handleMessageXP,
+
+  // Config
+  IGNORED_CHANNELS,
+  XP_COOLDOWN_MS,
 };

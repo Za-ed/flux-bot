@@ -3,48 +3,90 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
 } = require('discord.js');
 const { isAdmin, isModerator } = require('../utils/permissions');
+const { logAction } = require('../utils/modLog');
 
-const pendingTimeouts = new Map();
+// ✅ TTL: الطلبات تُحذف تلقائياً بعد 10 دقائق لتجنب memory leak
+const PENDING_TTL_MS = 10 * 60 * 1000;
+const pendingBans    = new Map();
+
+function setPendingBan(requestId, data) {
+  pendingBans.set(requestId, data);
+  setTimeout(() => {
+    if (pendingBans.has(requestId)) {
+      pendingBans.delete(requestId);
+      console.log(`[BAN] Request ${requestId} expired and removed.`);
+    }
+  }, PENDING_TTL_MS);
+}
 
 module.exports = {
-  pendingTimeouts,
+  pendingBans,
 
   data: new SlashCommandBuilder()
-    .setName('timeout')
-    .setDescription('كتم عضو مؤقتاً.')
-    .addUserOption((opt) => opt.setName('member').setDescription('العضو المراد كتمه.').setRequired(true))
-    .addIntegerOption((opt) =>
-      opt.setName('minutes').setDescription('مدة الكتم بالدقائق (1-1440).').setMinValue(1).setMaxValue(1440).setRequired(true)
+    .setName('ban')
+    .setDescription('حظر عضو من السيرفر.')
+    .addUserOption((opt) =>
+      opt.setName('member').setDescription('العضو المراد حظره.').setRequired(true)
     )
-    .addStringOption((opt) => opt.setName('reason').setDescription('سبب الكتم.').setRequired(false)),
+    .addStringOption((opt) =>
+      opt.setName('reason').setDescription('سبب الحظر.').setRequired(false)
+    )
+    .addIntegerOption((opt) =>
+      opt.setName('days')
+        .setDescription('حذف رسائل (0-7 أيام).')
+        .setMinValue(0).setMaxValue(7).setRequired(false)
+    ),
 
   async execute(interaction) {
     await interaction.deferReply();
 
-    if (!isModerator(interaction.member)) {
+    if (!isModerator(interaction.member))
       return interaction.editReply({ content: '❌ هذا الأمر للـ Moderator والأعلى فقط.' });
-    }
 
     const target = interaction.options.getMember('member');
-    const minutes = interaction.options.getInteger('minutes');
     const reason = interaction.options.getString('reason') ?? 'لم يُذكر سبب.';
-    const durationMs = minutes * 60 * 1000;
+    const days   = interaction.options.getInteger('days') ?? 0;
 
-    if (!target) return interaction.editReply({ content: '❌ العضو غير موجود.' });
+    if (!target)
+      return interaction.editReply({ content: '❌ العضو غير موجود في السيرفر.' });
+    if (target.id === interaction.user.id)
+      return interaction.editReply({ content: '❌ لا تقدر تحظر نفسك.' });
+    if (!target.bannable)
+      return interaction.editReply({ content: '❌ لا أملك صلاحية حظر هذا العضو (رتبته أعلى من رتبتي).' });
+    if (target.roles.highest.position >= interaction.member.roles.highest.position)
+      return interaction.editReply({ content: '❌ لا تقدر تحظر عضو رتبته أعلى من أو تساوي رتبتك.' });
 
-    // ── Admin أو Founder — ينفذ مباشرة ──────────────────────────────────────
+    // ── Admin/Founder — تنفيذ مباشر ──────────────────────────────────────────
     if (isAdmin(interaction.member)) {
-      await target.timeout(durationMs, reason);
+      // ✅ DM قبل الحظر (بعده لن نقدر نرسل)
+      const dmEmbed = new EmbedBuilder()
+        .setTitle('🔨  تم حظرك')
+        .setDescription(`تم حظرك من **${interaction.guild.name}**`)
+        .addFields(
+          { name: 'السبب',  value: reason },
+          { name: 'المشرف', value: interaction.user.tag }
+        )
+        .setColor(0x8b0000).setTimestamp();
+      await target.send({ embeds: [dmEmbed] }).catch(() => {});
+
+      await target.ban({ deleteMessageDays: days, reason });
+
+      await logAction(interaction.guild, {
+        type:      'ban',
+        moderator: interaction.user,
+        target,
+        reason,
+      }).catch(() => {});
 
       const embed = new EmbedBuilder()
-        .setTitle('🔇  تم الكتم')
+        .setTitle('🔨  تم الحظر')
         .addFields(
-          { name: 'العضو', value: `${target}`, inline: true },
-          { name: 'المشرف', value: `${interaction.user}`, inline: true },
-          { name: 'المدة', value: `${minutes} دقيقة` },
-          { name: 'السبب', value: reason }
+          { name: 'العضو',        value: `${target.user.tag}`,  inline: true },
+          { name: 'المشرف',       value: `${interaction.user}`, inline: true },
+          { name: 'السبب',        value: reason },
+          { name: 'حذف الرسائل', value: `${days} يوم` }
         )
-        .setColor(0xffa500)
+        .setColor(0x8b0000)
         .setThumbnail(target.user.displayAvatarURL({ dynamic: true }))
         .setFooter({ text: 'FLUX • IO  |  نظام الإدارة' })
         .setTimestamp();
@@ -52,50 +94,50 @@ module.exports = {
       return interaction.editReply({ embeds: [embed] });
     }
 
-    // ── Moderator — يرسل طلب موافقة ─────────────────────────────────────────
-    const requestId = `timeout_${Date.now()}_${interaction.user.id}`;
-    pendingTimeouts.set(requestId, {
-      targetId: target.id,
-      targetTag: target.user.tag,
-      durationMs,
-      minutes,
+    // ── Moderator — يحتاج موافقة إدارة ──────────────────────────────────────
+    const requestId = `ban_${Date.now()}_${interaction.user.id}`;
+    setPendingBan(requestId, {
+      targetId:     target.id,
+      targetTag:    target.user.tag,
       reason,
-      requesterId: interaction.user.id,
+      days,
+      requesterId:  interaction.user.id,
       requesterTag: interaction.user.tag,
-      guildId: interaction.guild.id,
+      guildId:      interaction.guild.id,
     });
 
     const requestEmbed = new EmbedBuilder()
-      .setTitle('🔔  طلب كتم — يحتاج موافقة')
-      .setDescription(`الـ Moderator **${interaction.user.tag}** يطلب كتم العضو **${target.user.tag}**`)
+      .setTitle('🔔  طلب حظر — يحتاج موافقة')
+      .setDescription(`الـ Moderator **${interaction.user.tag}** يطلب حظر **${target.user.tag}**`)
       .addFields(
-        { name: 'العضو', value: `${target} (${target.user.tag})`, inline: true },
-        { name: 'طلب بواسطة', value: `${interaction.user}`, inline: true },
-        { name: 'المدة', value: `${minutes} دقيقة` },
-        { name: 'السبب', value: reason }
+        { name: 'العضو',      value: `${target} (${target.user.tag})`, inline: true },
+        { name: 'طلب بواسطة', value: `${interaction.user}`,            inline: true },
+        { name: 'السبب',      value: reason },
+        { name: 'حذف الرسائل', value: `${days} يوم` },
+        { name: '⏰ ينتهي',   value: 'بعد 10 دقائق' }
       )
       .setColor(0xffa500)
       .setThumbnail(target.user.displayAvatarURL({ dynamic: true }))
-      .setFooter({ text: 'FLUX • IO  |  نظام الموافقات — للإدارة فقط' })
+      .setFooter({ text: 'FLUX • IO  |  نظام الموافقات' })
       .setTimestamp();
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`approve_timeout_${requestId}`)
-        .setLabel('✅ موافقة وتنفيذ')
+        .setCustomId(`approve_ban_${requestId}`)
+        .setLabel('✅ موافقة')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
-        .setCustomId(`reject_timeout_${requestId}`)
+        .setCustomId(`reject_ban_${requestId}`)
         .setLabel('❌ رفض')
         .setStyle(ButtonStyle.Danger)
     );
 
     await interaction.editReply({
-      content: `⏳ تم إرسال طلب الكتم للإدارة — بانتظار الموافقة.`,
-      embeds: [requestEmbed],
+      content: '⏳ تم إرسال الطلب للإدارة — ينتهي خلال 10 دقائق.',
+      embeds:  [requestEmbed],
       components: [row],
     });
 
-    console.log(`[TIMEOUT REQUEST] ${target.user.tag} — requested by ${interaction.user.tag}`);
+    console.log(`[BAN REQUEST] ${target.user.tag} — by ${interaction.user.tag} — ID: ${requestId}`);
   },
 };

@@ -10,41 +10,48 @@ module.exports = {
     .setDescription('مسح عدد من الرسائل في القناة الحالية.')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addIntegerOption((opt) =>
-      opt
-        .setName('amount')
+      opt.setName('amount')
         .setDescription('عدد الرسائل المراد مسحها (1 - 100).')
-        .setMinValue(1)
-        .setMaxValue(100)
-        .setRequired(true)
+        .setMinValue(1).setMaxValue(100).setRequired(true)
     )
     .addUserOption((opt) =>
-      opt.setName('member').setDescription('مسح رسائل عضو معين فقط (اختياري).').setRequired(false)
+      opt.setName('member')
+        .setDescription('مسح رسائل عضو معين فقط (اختياري).')
+        .setRequired(false)
     ),
 
   async execute(interaction) {
     await interaction.deferReply({ ephemeral: true });
 
-    const amount = interaction.options.getInteger('amount');
+    const amount     = interaction.options.getInteger('amount');
     const targetUser = interaction.options.getUser('member');
 
-    let messages = await interaction.channel.messages.fetch({ limit: 100 });
+    // ✅ لو في فلتر لعضو معين، نجلب أكثر لأننا ننقح منهم
+    // لو ما في فلتر، نجلب بالضبط ما طلبه المستخدم
+    const fetchLimit = targetUser ? 100 : amount;
 
-    // Filter by user if specified
+    let messages = await interaction.channel.messages.fetch({ limit: fetchLimit });
+
     if (targetUser) {
-      messages = messages.filter((m) => m.author.id === targetUser.id);
+      // فلتر برسائل العضو المحدد ثم خذ العدد المطلوب
+      messages = [...messages.values()]
+        .filter((m) => m.author.id === targetUser.id)
+        .slice(0, amount);
+    } else {
+      messages = [...messages.values()].slice(0, amount);
     }
 
-    // Slice to requested amount
-    messages = [...messages.values()].slice(0, amount);
-
-    // Discord only allows bulk delete for messages under 14 days old
+    // Discord: bulk delete يقبل فقط رسائل أقل من 14 يوم
+    const TWO_WEEKS = 14 * 24 * 60 * 60 * 1000;
     const deletable = messages.filter(
-      (m) => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000
+      (m) => Date.now() - m.createdTimestamp < TWO_WEEKS
     );
 
     if (deletable.length === 0) {
       return interaction.editReply({
-        content: '❌ لا توجد رسائل قابلة للحذف (الرسائل أقدم من 14 يوم لا يمكن حذفها).',
+        content: targetUser
+          ? `❌ ما وجدت رسائل حديثة لـ ${targetUser.tag} قابلة للحذف (الرسائل أقدم من 14 يوم).`
+          : '❌ لا توجد رسائل قابلة للحذف (أقدم من 14 يوم).',
       });
     }
 
@@ -53,7 +60,12 @@ module.exports = {
     const clearEmbed = new EmbedBuilder()
       .setTitle('🧹  تم مسح الرسائل')
       .setDescription(
-        `تم حذف **${deleted.size}** رسالة${targetUser ? ` من ${targetUser}` : ''} بواسطة ${interaction.user}.`
+        `تم حذف **${deleted.size}** رسالة` +
+        `${targetUser ? ` من ${targetUser}` : ''}` +
+        ` بواسطة ${interaction.user}.` +
+        (deletable.length < messages.length
+          ? `\n⚠️ ${messages.length - deletable.length} رسالة تجاوزت 14 يوم ولم تُحذف.`
+          : '')
       )
       .setColor(0x1e90ff)
       .setFooter({ text: 'FLUX • IO  |  نظام الإدارة' })

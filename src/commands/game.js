@@ -1,5 +1,5 @@
 // ─── game.js — أمر موحد لكل الألعاب ─────────────────────────────────────────
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 const {
   startTrivia, startMath, startScramble, startBomb, startGuessChar,
 } = require('../events/gamingCorner');
@@ -13,11 +13,11 @@ module.exports = {
         .setDescription('نوع اللعبة')
         .setRequired(true)
         .addChoices(
-          { name: '🧠 تريفيا',             value: 'trivia'    },
-          { name: '⚡ رياضيات سريعة',      value: 'math'      },
-          { name: '🔀 خمّن الكلمة',        value: 'scramble'  },
-          { name: '💣 قنبلة الأرقام',      value: 'bomb'      },
-          { name: '🎭 خمّن الشخصية',       value: 'character' },
+          { name: '🧠 تريفيا',        value: 'trivia'    },
+          { name: '⚡ رياضيات سريعة', value: 'math'      },
+          { name: '🔀 خمّن الكلمة',   value: 'scramble'  },
+          { name: '💣 قنبلة الأرقام', value: 'bomb'      },
+          { name: '🎭 خمّن الشخصية',  value: 'character' },
         )
     )
     .addStringOption((opt) =>
@@ -32,7 +32,7 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    // تأكد إن القناة هي gaming-corner
+    // ✅ تحقق من القناة قبل الـ defer
     if (!interaction.channel.name.toLowerCase().includes('gaming')) {
       return interaction.reply({
         content: '❌ هذا الأمر يشتغل فقط في قناة **🎮〢gaming-corner**!',
@@ -45,14 +45,25 @@ module.exports = {
     const type       = interaction.options.getString('type');
     const difficulty = interaction.options.getString('difficulty') ?? 'medium';
 
-    switch (type) {
-      case 'trivia':    await startTrivia(interaction.channel); break;
-      case 'math':      await startMath(interaction.channel, difficulty); break;
-      case 'scramble':  await startScramble(interaction.channel); break;
-      case 'bomb':      await startBomb(interaction.channel); break;
-      case 'character': await startGuessChar(interaction.channel); break;
-    }
+    // ✅ try/catch شامل لكل الألعاب
+    try {
+      switch (type) {
+        case 'trivia':    await startTrivia(interaction.channel); break;
+        case 'math':      await startMath(interaction.channel, difficulty); break;
+        case 'scramble':  await startScramble(interaction.channel); break;
+        case 'bomb':      await startBomb(interaction.channel); break;
+        case 'character': await startGuessChar(interaction.channel); break;
+        default:
+          return interaction.editReply({ content: '❌ نوع لعبة غير معروف.' });
+      }
 
-    await interaction.editReply({ content: '✅ تم تشغيل اللعبة!' });
+      await interaction.editReply({ content: '✅ تم تشغيل اللعبة! 🎮' });
+
+    } catch (err) {
+      console.error(`[GAME ERROR] type=${type}:`, err);
+      await interaction.editReply({
+        content: `❌ حصل خطأ أثناء تشغيل اللعبة: \`${err.message}\``,
+      });
+    }
   },
 };
