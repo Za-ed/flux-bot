@@ -147,7 +147,7 @@ module.exports = {
   async execute(message) {
     if (message.author.bot) return;
     const { trackMessage } = require('../utils/dailyReport');
-           trackMessage(message.guild?.id, message.author.id);
+trackMessage(message.guild?.id, message.author.id);
     if (!message.guild) return;
 
     const { author, member, channel, content } = message;
