@@ -1,113 +1,108 @@
 // ─── chillChat.js ─────────────────────────────────────────────────────────────
-// ✅ API key من .env — لا hardcoding
+// ✅ تم التطوير ليدعم الذاكرة الجماعية والتدخل البشري الطبيعي
 
 const Groq = require('groq-sdk');
 
-const AI_COOLDOWN_MS = 1500;
+const AI_COOLDOWN_MS = 2000;
 
-const chillHistory  = new Map();
+// غيرنا الذاكرة لتكون للقناة بدل المستخدم عشان يفهم سياق السوالف كلها
+const channelHistory = new Map();
 const chillCooldown = new Map();
 
 function detectLanguage(text) {
   const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
   const total = text.replace(/\s/g, '').length;
-  return total > 0 && arabicChars / total > 0.3 ? 'arabic' : 'english';
+  return total > 0 && arabicChars / total > 0.25 ? 'arabic' : 'english';
 }
 
 function buildSystemPrompt(lang) {
   if (lang === 'arabic') {
-    return `انت فلاكس، شاب عادي في قناة chill على discord، مو بوت ومو مساعد
+    return `انت فلاكس، شاب عادي في قناة chill على discord، مو بوت ومو مساعد. انت جالس تقرأ سوالف الشباب في جروب شات.
 
 شخصيتك:
-- كيوت وودود بس مو زيادة، زي صاحب حقيقي
-- سكاستيك وعندك بديهة سريعة، بتلسع خفيف بس بمزح
-- هادي ومريح، ما تبالغ بأي شيء
-- تحب الناس وتنبسط معهم
+- كيوت وودود بس مو كريج، زي صاحب حقيقي.
+- ذكي وعندك بديهة سريعة، بتلسع خفيف بس بمزح.
+- هادي ومريح، ما تبالغ بأي شيء.
+- احياناً تتفق معهم واحياناً تعاندهم للمزح.
 
-قواعد الكتابة — هذا أهم شيء، اتبعها حرفياً:
-- اكتب كل شيء بحروف صغيرة بدون ما تكبّر أول حرف أبداً
-- لا تحط نقطة في آخر الجملة أبداً (النقطة تحس انك زعلان)
-- استخدم "!" و "؟" بس لما تكون متحمس أو سؤال حقيقي
-- الجمل قصيرة جداً — جملة أو جملتين بالكثير
-- أحياناً تكتب فكرتين على سطرين منفصلين
-- استخدم هههه أو ههههه بدل lol
-- استخدم إيموجيز بشكل طبيعي مو زيادة ومو ناقصة، 1 أو 2 في الرسالة
-- خلط عربي وانجليزي طبيعي: مثلاً "يسطا that's so true" أو "والله bro"
-- كلمات تستخدمها: يسطا، والله، اوكيه، نفسي، اكيد، بصراحة، لا يا عمي، شوف، اسمع، هههه، مو كذا؟، خلاص، طيب، بعدين، ما أدري
-- إذا حدا قالك "فلاكس" رد عليه مباشرة بحرارة 🫶
-- لا تقول أبداً أنك بوت أو AI
-- لا تستخدم كلام رسمي أبداً
-- إذا حدا أرسل إيموجي بس، ردّ بإيموجي أو جملة قصيرة جداً
-
-أمثلة على ردودك:
-"هههه لا يا عمي 💀"
-"والله صح بصراحة"
-"يسطا that's actually kinda fire 🔥"
-"اوكيه اوكيه هههه خلاص 😭"
-"بصراحة؟ ما أدري 🤷"`;
+قواعد الكتابة (مهم جداً عدم كسرها):
+- لا تكرر نفس الكلمات في كل رد. نوع في كلامك.
+- اكتب كل شيء بحروف صغيرة.
+- لا تحط نقطة في آخر الجملة أبداً.
+- استخدم "!" و "؟" بس لما تكون متحمس.
+- الجمل قصيرة جداً — جملة واحدة أو كلمتين أحياناً تكفي.
+- استخدم هههه أو ههههه (مو دايما، نوع بينها وبين ايموجي 😭 او 💀).
+- خلط عربي وانجليزي طبيعي: مثلاً "يسطا that's true" أو "والله bro".
+- كلمات تستخدمها بتبادل: يسطا، والله، يب، بصراحة، شوف، اسمع، هههه، تستهبل، ديم، ما أدري.
+- إذا حدا قال "فلاكس" رد عليه كأنه ناداك.
+- لا تقول أبداً أنك بوت أو AI أو لغة برمجة.
+- تفاعل مع السياق، انت جزء من الجروب.`;
   }
 
-  return `you are flux, a regular guy chilling in a discord chill channel, not a bot not an assistant
+  return `you are flux, a regular guy chilling in a discord chill channel group chat. not a bot.
 
 your personality:
-- cute and friendly but not cringe, like a real friend
-- sarcastic and witty, quick with the jokes
-- calm and chill, never overreacting
-- you genuinely like talking to people
+- friendly but not cringe, like a real gamer/friend.
+- sarcastic, witty, quick with the jokes.
+- calm and chill.
+- you sometimes agree, sometimes playfully disagree.
 
-writing rules:
-- write everything in lowercase, never capitalize the first letter
-- never put a period at the end of a sentence
-- use "!" and "?" only when genuinely excited or asking something
-- keep messages short — one or two lines max
-- use lol, ngl, tbh, fr, idk, nah, omg, lowkey, deadass, bruh, bro, bestie
-- use emojis naturally — 1 or 2 per message max
-- never use formal words like "certainly" "of course" "I'd be happy to"
-- never say you're a bot or AI
-
-example responses:
-"lol nah that's actually kinda valid 😭"
-"bro same ngl"
-"deadass tho?? fr"
-"nah that's lowkey fire 🔥"
-"idk man.. maybe 🤷"
-"bruh 💀"`;
+writing rules (CRITICAL):
+- never repeat the same phrases every time. vary your vocabulary.
+- lowercase everything.
+- no periods at the end of sentences.
+- short messages — one sentence or a few words is often enough.
+- use emojis naturally but sparingly (😭, 💀, 🔥, 👀).
+- use slang: lol, ngl, tbh, fr, idk, nah, omg, lowkey, deadass, bruh, bro, wtf, damn.
+- if someone says "flux", acknowledge them.
+- never say you're an AI or a bot.
+- react to the context of the group chat naturally.`;
 }
 
-async function queryGroq(userId, userMessage, username) {
-  // ✅ تحقق من وجود API key
+// دالة منفصلة بس عشان تحدث الذاكرة بدون ما ترد
+function updateChannelHistory(channelId, username, messageContent) {
+  if (!channelHistory.has(channelId)) channelHistory.set(channelId, []);
+  const history = channelHistory.get(channelId);
+  
+  // حفظ اسم المستخدم مع رسالته عشان البوت يعرف مين قال ايش
+  history.push({ role: 'user', content: `[${username}]: ${messageContent}` });
+  
+  // نحتفظ بآخر 12 رسالة فقط عشان ما ينسى السياق بس ما يستهلك توكنز كثير
+  if (history.length > 12) history.shift();
+  return history;
+}
+
+async function queryGroq(channelId, lang) {
   const GROQ_KEY = process.env.GROQ_API_KEY;
   if (!GROQ_KEY) throw new Error('GROQ_API_KEY غير موجود في .env');
 
   const client = new Groq({ apiKey: GROQ_KEY });
-  const lang   = detectLanguage(userMessage);
-
-  if (!chillHistory.has(userId)) chillHistory.set(userId, []);
-  const history = chillHistory.get(userId);
-
-  history.push({ role: 'user', content: `${username}: ${userMessage}` });
-  if (history.length > 16) history.splice(0, history.length - 16);
+  const history = channelHistory.get(channelId) || [];
 
   const completion = await client.chat.completions.create({
-    model:             'llama-3.3-70b-versatile',
-    messages:          [{ role: 'system', content: buildSystemPrompt(lang) }, ...history],
-    max_tokens:        120,
-    temperature:       0.95,
-    frequency_penalty: 0.6,
-    presence_penalty:  0.4,
+    model: 'llama-3.3-70b-versatile',
+    messages: [{ role: 'system', content: buildSystemPrompt(lang) }, ...history],
+    max_tokens: 150,
+    temperature: 0.9, // قللناها شعرة عشان يكون منطقي أكثر
+    frequency_penalty: 0.8, // رفعناها عشان نمنعه يكرر نفس الكلمات
+    presence_penalty: 0.5,
   });
 
   const text = completion.choices[0]?.message?.content?.trim();
   if (!text) throw new Error('Empty response');
 
-  history.push({ role: 'assistant', content: text });
-  return text;
+  // تنظيف الرد إذا كان البوت بالغلط كتب اسمه في البداية
+  const cleanText = text.replace(/^\[?flux\]?:?\s*/i, '');
+  
+  // إضافة رد البوت للذاكرة
+  history.push({ role: 'assistant', content: cleanText });
+  return cleanText;
 }
 
 function humanDelay(messageLength) {
-  const base   = 600;
-  const extra  = Math.min(messageLength * 15, 2500);
-  const jitter = Math.random() * 400;
+  const base = 800;
+  const extra = Math.min(messageLength * 20, 3000);
+  const jitter = Math.random() * 500;
   return base + extra + jitter;
 }
 
@@ -120,28 +115,45 @@ module.exports = {
     if (author.bot) return;
     if (!channel.name.toLowerCase().includes('chill')) return;
 
-    const now      = Date.now();
-    const lastUsed = chillCooldown.get(author.id) || 0;
+    const now = Date.now();
+    
+    // 1. تحديث ذاكرة القناة دائماً (حتى لو البوت ما رح يرد)
+    updateChannelHistory(channel.id, author.username, content);
+
+    // 2. هل البوت لازم يرد؟
+    // يرد إذا: تم عمل منشن له، أو انذكر اسمه، أو بنسبة حظ 15% (عشان يتدخل فجأة بالسوالف)
+    const isMentioned = message.mentions.has(message.client.user?.id) || /فلاكس|flux/i.test(content);
+    const randomReplyChance = Math.random() < 0.15; // 15% chance
+    const shouldReply = isMentioned || randomReplyChance;
+
+    if (!shouldReply) return; // إذا مافي داعي يرد، يكتفي بالقراءة وحفظ السياق
+
+    // التحقق من الـ Cooldown
+    const lastUsed = chillCooldown.get(channel.id) || 0;
     if (now - lastUsed < AI_COOLDOWN_MS) return;
-    chillCooldown.set(author.id, now);
+    chillCooldown.set(channel.id, now);
 
     try {
+      const lang = detectLanguage(content);
       const delay = humanDelay(content.length);
 
-      setTimeout(async () => {
-        await channel.sendTyping().catch(() => {});
-      }, 300);
-
-      await new Promise((r) => setTimeout(r, delay));
-
-      const response = await queryGroq(author.id, content, author.username);
-
+      // محاكاة بشرية: يقرأ الرسالة شوي قبل لا يبلش يكتب
+      await new Promise((r) => setTimeout(r, delay * 0.4));
       await channel.sendTyping().catch(() => {});
-      await new Promise((r) => setTimeout(r, 400));
+      
+      const response = await queryGroq(channel.id, lang);
 
-      await channel.send(response);
+      // محاكاة وقت الكتابة الفعلي
+      await new Promise((r) => setTimeout(r, delay * 0.6));
+      
+      // إذا كان الرد بسبب منشن مباشر، نعمل له رد مباشر (Reply)، وإلا نرسلها رسالة عادية
+      if (isMentioned) {
+          await message.reply(response);
+      } else {
+          await channel.send(response);
+      }
 
-      console.log(`[CHILL] ${author.tag} → ${content.slice(0, 30)} | رد: ${response.slice(0, 40)}`);
+      console.log(`[CHILL] رد ذكي في ${channel.name} | الرد: ${response.slice(0, 40)}`);
     } catch (err) {
       console.error('[CHILL] خطأ:', err.message);
     }
