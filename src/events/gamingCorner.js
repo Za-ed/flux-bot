@@ -4,8 +4,7 @@
 
 const { EmbedBuilder } = require('discord.js');
 const { updateProgress } = require('./dailyTasks');
-const { checkStatBadges } = require('./badges');
-
+const { checkStatBadges } = require('../utils/badges');
 // ─── Config ───────────────────────────────────────────────────────────────────
 const GAMING_CHANNEL = 'gaming-corner';
 const ANSWER_TIMEOUT = 20000; // 20 ثانية للإجابة
