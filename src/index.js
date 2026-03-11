@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 3000;
@@ -11,10 +9,14 @@ app.get('/', (req, res) => {
 app.listen(port, () => {
   console.log(`Web server is running on port ${port}`);
 });
+require('dotenv').config();
 
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits, Collection } = require('discord.js'); // ✅ مرة وحدة بس
+//const { Client, GatewayIntentBits, Collection } = require('discord.js');
+
+// ─── Client Initialization ───────────────────────────────────────────────────
+const { Client, GatewayIntentBits, Collection } = require('discord.js');
 
 const client = new Client({
   intents: [
