@@ -1,58 +1,61 @@
+// ─── setup-tickets.js ─────────────────────────────────────────────────────────
 const {
   SlashCommandBuilder,
-  PermissionFlagsBits,
   EmbedBuilder,
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
+  StringSelectMenuBuilder,
 } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('setup-tickets')
-    .setDescription('تفعيل نظام التذاكر في القناة الحالية.')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    .setDescription('إعداد نظام التذاكر في القناة الحالية.'),
 
   async execute(interaction) {
     await interaction.deferReply({ ephemeral: true });
 
     const embed = new EmbedBuilder()
-      .setTitle('🎫  FLUX • IO  —  مركز الدعم')
+      .setTitle('🎫  نظام الدعم — FLUX IO')
       .setDescription(
-        'تحتاج مساعدة؟ عندك بلاغ؟ تبي تتشارك معنا؟\n' +
-        'اختر التصنيف المناسب أدناه لفتح **تذكرة خاصة**.\n\n' +
-        '> 💻 **دعم فني** — مساعدة تقنية، أسئلة، أو استفسارات عامة.\n' +
-        '> 🚨 **بلاغ** — الإبلاغ عن عضو مخالف أو حادثة معينة.\n' +
-        '> 🤝 **شراكة** — اقتراح تعاون أو شراكة مع السيرفر.\n\n' +
-        '*سيرد عليك فريق الإدارة في أقرب وقت ممكن.*'
+        'مرحباً بك في نظام الدعم! 👋\n\n' +
+        'اختر نوع التذكرة من القائمة أدناه وسيتم فتح قناة خاصة لك مع الفريق.\n\n' +
+        '> 🛠️ **دعم فني** — مشاكل تقنية أو أسئلة\n' +
+        '> 🚨 **بلاغ** — الإبلاغ عن عضو أو مشكلة\n' +
+        '> 🤝 **شراكة** — طلبات التعاون والشراكة\n\n' +
+        '*سيتم الرد عليك في أقرب وقت ممكن.*'
       )
       .setColor(0x1e90ff)
       .setThumbnail(interaction.guild.iconURL({ dynamic: true }))
-      .setFooter({
-        text: 'FLUX • IO  |  تذكرة واحدة لكل مشكلة من فضلك.',
-        iconURL: interaction.guild.iconURL({ dynamic: true }),
-      })
+      .setFooter({ text: 'FLUX • IO  |  نظام التذاكر' })
       .setTimestamp();
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('ticket_support')
-        .setLabel('دعم فني')
-        .setEmoji('💻')
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId('ticket_report')
-        .setLabel('بلاغ')
-        .setEmoji('🚨')
-        .setStyle(ButtonStyle.Danger),
-      new ButtonBuilder()
-        .setCustomId('ticket_partnership')
-        .setLabel('شراكة')
-        .setEmoji('🤝')
-        .setStyle(ButtonStyle.Success)
-    );
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId('ticket_select')
+      .setPlaceholder('📋  اختر نوع التذكرة...')
+      .addOptions([
+        {
+          label:       'دعم فني',
+          description: 'مشكلة تقنية أو سؤال تحتاج مساعدة فيه',
+          value:       'ticket_support',
+          emoji:       '🛠️',
+        },
+        {
+          label:       'بلاغ',
+          description: 'الإبلاغ عن عضو أو موقف معين',
+          value:       'ticket_report',
+          emoji:       '🚨',
+        },
+        {
+          label:       'شراكة',
+          description: 'طلب شراكة أو تعاون مع FLUX IO',
+          value:       'ticket_partnership',
+          emoji:       '🤝',
+        },
+      ]);
+
+    const row = new ActionRowBuilder().addComponents(selectMenu);
 
     await interaction.channel.send({ embeds: [embed], components: [row] });
-    await interaction.editReply({ content: '✅ تم تفعيل نظام التذاكر بنجاح.' });
+    await interaction.editReply({ content: '✅ تم إعداد نظام التذاكر!' });
   },
 };
