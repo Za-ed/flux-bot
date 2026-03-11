@@ -13,7 +13,7 @@ require('dotenv').config();
 
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
+//const { Client, GatewayIntentBits, Collection } = require('discord.js');
 
 // ─── Client Initialization ───────────────────────────────────────────────────
 const { Client, GatewayIntentBits, Collection } = require('discord.js');

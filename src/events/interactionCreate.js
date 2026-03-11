@@ -1,122 +1,72 @@
 const {
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  PermissionsBitField,
-  ChannelType,
+  EmbedBuilder, ActionRowBuilder, ButtonBuilder,
+  ButtonStyle, PermissionsBitField, ChannelType,
 } = require('discord.js');
+const { isAdmin, isModerator, ROLES } = require('../utils/permissions');
 
-// ─── Ticket Category Name ────────────────────────────────────────────────────
 const TICKET_CATEGORY_NAME = 'Tickets';
 const STAFF_ROLE_NAME = 'Staff';
 
-// ─── Ticket Label Map ────────────────────────────────────────────────────────
 const TICKET_TYPES = {
-  ticket_support: {
-    label: 'Support',
-    emoji: '💻',
-    color: 0x1e90ff,
-    description: 'Describe your issue in detail and a staff member will assist you shortly.',
-  },
-  ticket_report: {
-    label: 'Report',
-    emoji: '🚨',
-    color: 0xff4444,
-    description: 'Please provide the username, evidence (screenshots), and a description of the incident.',
-  },
-  ticket_partnership: {
-    label: 'Partnership',
-    emoji: '🤝',
-    color: 0x2ecc71,
-    description: 'Tell us about your server/project and what kind of partnership you are proposing.',
-  },
+  ticket_support: { label: 'Support', emoji: '💻', color: 0x1e90ff, description: 'Describe your issue and a staff member will assist you shortly.' },
+  ticket_report: { label: 'Report', emoji: '🚨', color: 0xff4444, description: 'Provide the username, evidence, and description of the incident.' },
+  ticket_partnership: { label: 'Partnership', emoji: '🤝', color: 0x2ecc71, description: 'Tell us about your project and what kind of partnership you are proposing.' },
 };
 
-// ─── Helper: Find or Create Ticket Category ──────────────────────────────────
 async function getOrCreateCategory(guild) {
-  let category = guild.channels.cache.find(
+  return guild.channels.cache.find(
     (c) => c.type === ChannelType.GuildCategory && c.name === TICKET_CATEGORY_NAME
-  );
-
-  if (!category) {
-    category = await guild.channels.create({
-      name: TICKET_CATEGORY_NAME,
-      type: ChannelType.GuildCategory,
-    });
-  }
-
-  return category;
+  ) ?? await guild.channels.create({ name: TICKET_CATEGORY_NAME, type: ChannelType.GuildCategory });
 }
 
-// ─── Helper: Find Staff Role ─────────────────────────────────────────────────
 function getStaffRole(guild) {
   return guild.roles.cache.find((r) => r.name === STAFF_ROLE_NAME);
 }
 
-// ─── Main Export ─────────────────────────────────────────────────────────────
 module.exports = {
   name: 'interactionCreate',
   once: false,
 
   async execute(interaction, client) {
-    // ── Slash Command Routing ──────────────────────────────────────────────
+
+    // ── Slash Commands ─────────────────────────────────────────────────────────
     if (interaction.isChatInputCommand()) {
       const command = client.commands.get(interaction.commandName);
-
-      if (!command) {
-        console.warn(`[COMMANDS] Unknown command received: ${interaction.commandName}`);
-        return;
-      }
-
+      if (!command) return;
       try {
         await command.execute(interaction);
       } catch (error) {
         console.error(`[COMMANDS] Error in /${interaction.commandName}:`, error);
-        const errorMsg = { content: '❌ An error occurred while executing this command.', ephemeral: true };
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp(errorMsg).catch(() => {});
-        } else {
-          await interaction.reply(errorMsg).catch(() => {});
-        }
+        const msg = { content: '❌ حدث خطأ أثناء تنفيذ الأمر.', ephemeral: true };
+        if (interaction.replied || interaction.deferred) await interaction.followUp(msg).catch(() => {});
+        else await interaction.reply(msg).catch(() => {});
       }
-
       return;
     }
 
-    // ── Button Interaction Routing ─────────────────────────────────────────
+    // ── Buttons ────────────────────────────────────────────────────────────────
     if (interaction.isButton()) {
       const { customId, guild, user, member } = interaction;
 
-      // ── Open Ticket Buttons ──────────────────────────────────────────────
+      // ════════════════════════════════════════════════════════════════════════
+      // TICKET BUTTONS
+      // ════════════════════════════════════════════════════════════════════════
       if (TICKET_TYPES[customId]) {
         await interaction.deferReply({ ephemeral: true });
-
         const ticketInfo = TICKET_TYPES[customId];
         const staffRole = getStaffRole(guild);
 
-        // Prevent duplicate tickets from the same user of the same type
         const existingChannel = guild.channels.cache.find(
-          (c) =>
-            c.name === `${ticketInfo.label.toLowerCase()}-${user.id}` &&
-            c.type === ChannelType.GuildText
+          (c) => c.name === `${ticketInfo.label.toLowerCase()}-${user.id}` && c.type === ChannelType.GuildText
         );
-
         if (existingChannel) {
-          await interaction.editReply({
-            content: `❗ You already have an open ticket: ${existingChannel}. Please resolve it before opening a new one.`,
-          });
-          return;
+          return interaction.editReply({ content: `❗ لديك تذكرة مفتوحة بالفعل: ${existingChannel}` });
         }
 
         const category = await getOrCreateCategory(guild);
 
-        // ── Build Permission Overwrites ──────────────────────────────────
         const permissionOverwrites = [
-          {
-            id: guild.roles.everyone,
-            deny: [PermissionsBitField.Flags.ViewChannel],
-          },
+          { id: guild.roles.everyone, deny: [PermissionsBitField.Flags.ViewChannel] },
           {
             id: user.id,
             allow: [
@@ -141,23 +91,20 @@ module.exports = {
           });
         }
 
-        // ── Create Ticket Channel ────────────────────────────────────────
         const ticketChannel = await guild.channels.create({
           name: `${ticketInfo.label.toLowerCase()}-${user.id}`,
           type: ChannelType.GuildText,
           parent: category.id,
           permissionOverwrites,
-          topic: `Ticket opened by ${user.tag} | Type: ${ticketInfo.label}`,
+          topic: `Ticket by ${user.tag} | ${ticketInfo.label}`,
         });
 
-        // ── Welcome Embed Inside Ticket ──────────────────────────────────
         const welcomeEmbed = new EmbedBuilder()
           .setTitle(`${ticketInfo.emoji}  ${ticketInfo.label} Ticket`)
           .setDescription(
-            `Welcome, ${user}!\n\n` +
-            `${ticketInfo.description}\n\n` +
-            `${staffRole ? staffRole : '**Staff**'} will be with you shortly.\n\n` +
-            '*When your issue is resolved, click the button below to close this ticket.*'
+            `مرحباً ${user}!\n\n${ticketInfo.description}\n\n` +
+            `${staffRole ? staffRole : '**Staff**'} سيتواصل معك قريباً.\n\n` +
+            '*عند الانتهاء اضغط الزر أدناه لإغلاق التذكرة.*'
           )
           .setColor(ticketInfo.color)
           .setThumbnail(guild.iconURL({ dynamic: true }))
@@ -167,68 +114,168 @@ module.exports = {
         const closeRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId(`close_ticket_${ticketChannel.id}`)
-            .setLabel('Close Ticket')
-            .setEmoji('🔒')
+            .setLabel('Close Ticket').setEmoji('🔒')
             .setStyle(ButtonStyle.Danger)
         );
 
-        const staffPing = staffRole ? `${staffRole}` : '*(No Staff role found)*';
         await ticketChannel.send({
-          content: `${user} ${staffPing}`,
+          content: `${user} ${staffRole ?? ''}`,
           embeds: [welcomeEmbed],
           components: [closeRow],
         });
 
-        await interaction.editReply({
-          content: `✅ Your ticket has been created: ${ticketChannel}`,
-        });
-
+        await interaction.editReply({ content: `✅ تم فتح تذكرتك: ${ticketChannel}` });
         console.log(`[TICKETS] Opened: ${ticketChannel.name} for ${user.tag}`);
         return;
       }
 
-      // ── Close Ticket Button ──────────────────────────────────────────────
+      // ── Close Ticket ─────────────────────────────────────────────────────────
       if (customId.startsWith('close_ticket_')) {
         await interaction.deferReply();
-
         const targetChannelId = customId.replace('close_ticket_', '');
         const channelToClose = guild.channels.cache.get(targetChannelId);
+        if (!channelToClose) return interaction.editReply({ content: '❌ القناة غير موجودة.' });
 
-        if (!channelToClose) {
-          await interaction.editReply({ content: '❌ Ticket channel not found.' });
-          return;
-        }
-
-        // Only Staff or the ticket owner (extracted from channel name) can close
         const staffRole = getStaffRole(guild);
         const isStaff = staffRole && member.roles.cache.has(staffRole.id);
-        const channelNameParts = channelToClose.name.split('-');
-        const ticketOwnerId = channelNameParts[channelNameParts.length - 1];
-        const isOwner = user.id === ticketOwnerId;
+        const ticketOwnerId = channelToClose.name.split('-').pop();
 
-        if (!isStaff && !isOwner) {
-          await interaction.editReply({
-            content: '❌ Only Staff or the ticket creator can close this ticket.',
-          });
-          return;
+        if (!isStaff && user.id !== ticketOwnerId && !isAdmin(member)) {
+          return interaction.editReply({ content: '❌ فقط الإدارة أو صاحب التذكرة يقدر يغلقها.' });
         }
 
         const closingEmbed = new EmbedBuilder()
-          .setTitle('🔒  Ticket Closing')
-          .setDescription(`This ticket was closed by ${user}.\nThe channel will be **deleted in 5 seconds**.`)
-          .setColor(0xff4444)
-          .setTimestamp();
+          .setTitle('🔒  جاري إغلاق التذكرة')
+          .setDescription(`أُغلقت بواسطة ${user}.\nستُحذف القناة خلال **5 ثواني**.`)
+          .setColor(0xff4444).setTimestamp();
 
         await interaction.editReply({ embeds: [closingEmbed] });
+        setTimeout(() => channelToClose.delete(`Closed by ${user.tag}`).catch(() => {}), 5000);
+        return;
+      }
 
-        console.log(`[TICKETS] Closing: ${channelToClose.name} — requested by ${user.tag}`);
+      // ════════════════════════════════════════════════════════════════════════
+      // APPROVAL BUTTONS — BAN
+      // ════════════════════════════════════════════════════════════════════════
+      if (customId.startsWith('approve_ban_') || customId.startsWith('reject_ban_')) {
 
-        setTimeout(async () => {
-          await channelToClose.delete(`Ticket closed by ${user.tag}`).catch((err) => {
-            console.error('[TICKETS] Failed to delete ticket channel:', err.message);
-          });
-        }, 5000);
+        if (!isAdmin(member)) {
+          return interaction.reply({ content: '❌ فقط **CORE Admin🛡** و **CORE Founder👑** يقدرون يوافقون على هذا الطلب.', ephemeral: true });
+        }
 
+        const requestId = customId.replace('approve_ban_', '').replace('reject_ban_', '');
+        const banModule = require('../commands/ban');
+        const pending = banModule.pendingBans.get(requestId);
+
+        if (!pending) {
+          return interaction.reply({ content: '❌ هذا الطلب منتهي الصلاحية أو نُفّذ مسبقاً.', ephemeral: true });
+        }
+
+        banModule.pendingBans.delete(requestId);
+
+        // رفض
+        if (customId.startsWith('reject_ban_')) {
+          const rejectEmbed = new EmbedBuilder()
+            .setTitle('❌  تم رفض طلب الحظر')
+            .setDescription(`رفض **${user.tag}** طلب حظر **${pending.targetTag}**`)
+            .addFields({ name: 'طلب بواسطة', value: pending.requesterTag })
+            .setColor(0xff4444).setTimestamp();
+
+          await interaction.update({ embeds: [rejectEmbed], components: [] });
+          console.log(`[BAN] Request rejected by ${user.tag}`);
+          return;
+        }
+
+        // موافقة
+        try {
+          const targetMember = await guild.members.fetch(pending.targetId).catch(() => null);
+
+          if (targetMember) {
+            const dmEmbed = new EmbedBuilder()
+              .setTitle('🔨  تم حظرك')
+              .setDescription(`تم حظرك من **${guild.name}**`)
+              .addFields({ name: 'السبب', value: pending.reason }, { name: 'المشرف', value: user.tag })
+              .setColor(0x8b0000).setTimestamp();
+            await targetMember.send({ embeds: [dmEmbed] }).catch(() => {});
+          }
+
+          await guild.members.ban(pending.targetId, { deleteMessageDays: pending.days, reason: pending.reason });
+
+          const approveEmbed = new EmbedBuilder()
+            .setTitle('✅  تم تنفيذ الحظر')
+            .addFields(
+              { name: 'العضو', value: pending.targetTag, inline: true },
+              { name: 'وافق عليه', value: user.tag, inline: true },
+              { name: 'طلب بواسطة', value: pending.requesterTag, inline: true },
+              { name: 'السبب', value: pending.reason }
+            )
+            .setColor(0x8b0000).setTimestamp();
+
+          await interaction.update({ embeds: [approveEmbed], components: [] });
+          console.log(`[BAN] ${pending.targetTag} banned — approved by ${user.tag}`);
+        } catch (err) {
+          console.error('[BAN APPROVE]', err.message);
+          await interaction.reply({ content: `❌ فشل تنفيذ الحظر: ${err.message}`, ephemeral: true });
+        }
+        return;
+      }
+
+      // ════════════════════════════════════════════════════════════════════════
+      // APPROVAL BUTTONS — TIMEOUT
+      // ════════════════════════════════════════════════════════════════════════
+      if (customId.startsWith('approve_timeout_') || customId.startsWith('reject_timeout_')) {
+
+        if (!isAdmin(member)) {
+          return interaction.reply({ content: '❌ فقط **CORE Admin🛡** و **CORE Founder👑** يقدرون يوافقون على هذا الطلب.', ephemeral: true });
+        }
+
+        const requestId = customId.replace('approve_timeout_', '').replace('reject_timeout_', '');
+        const timeoutModule = require('../commands/timeout');
+        const pending = timeoutModule.pendingTimeouts.get(requestId);
+
+        if (!pending) {
+          return interaction.reply({ content: '❌ هذا الطلب منتهي الصلاحية أو نُفّذ مسبقاً.', ephemeral: true });
+        }
+
+        timeoutModule.pendingTimeouts.delete(requestId);
+
+        // رفض
+        if (customId.startsWith('reject_timeout_')) {
+          const rejectEmbed = new EmbedBuilder()
+            .setTitle('❌  تم رفض طلب الكتم')
+            .setDescription(`رفض **${user.tag}** طلب كتم **${pending.targetTag}**`)
+            .addFields({ name: 'طلب بواسطة', value: pending.requesterTag })
+            .setColor(0xff4444).setTimestamp();
+
+          await interaction.update({ embeds: [rejectEmbed], components: [] });
+          console.log(`[TIMEOUT] Request rejected by ${user.tag}`);
+          return;
+        }
+
+        // موافقة
+        try {
+          const targetMember = await guild.members.fetch(pending.targetId).catch(() => null);
+          if (!targetMember) return interaction.reply({ content: '❌ العضو غير موجود في السيرفر.', ephemeral: true });
+
+          await targetMember.timeout(pending.durationMs, pending.reason);
+
+          const approveEmbed = new EmbedBuilder()
+            .setTitle('✅  تم تنفيذ الكتم')
+            .addFields(
+              { name: 'العضو', value: pending.targetTag, inline: true },
+              { name: 'وافق عليه', value: user.tag, inline: true },
+              { name: 'طلب بواسطة', value: pending.requesterTag, inline: true },
+              { name: 'المدة', value: `${pending.minutes} دقيقة` },
+              { name: 'السبب', value: pending.reason }
+            )
+            .setColor(0xffa500).setTimestamp();
+
+          await interaction.update({ embeds: [approveEmbed], components: [] });
+          console.log(`[TIMEOUT] ${pending.targetTag} timed out — approved by ${user.tag}`);
+        } catch (err) {
+          console.error('[TIMEOUT APPROVE]', err.message);
+          await interaction.reply({ content: `❌ فشل تنفيذ الكتم: ${err.message}`, ephemeral: true });
+        }
         return;
       }
     }
