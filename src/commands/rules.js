@@ -77,7 +77,7 @@ module.exports = {
             'الجدال العلني أو محاولة التحايل على الإشراف سيؤدي إلى تصعيد العقوبة.',
         }
       )
-      .setImage('https://i.imgur.com/YourBannerImageHere.png')
+      .setImage('https://cdn.discordapp.com/attachments/1445061018341605459/1481180038320754688/unnamed.jpg?ex=69b25fe8&is=69b10e68&hm=e58f9ca43497934da9e25fa3b418bf750cb01afe2b557655bb0cf8ab9f948964&')
       .setFooter({
         text: 'FLUX • IO  |  آخر تحديث بواسطة الإدارة • للنسخة الإنجليزية افتح الثريد بالأسفل 👇',
       })
@@ -160,7 +160,7 @@ module.exports = {
             'Arguing publicly or attempting to circumvent moderation will result in escalated action.',
         }
       )
-      .setImage('https://i.imgur.com/YourBannerImageHere.png')
+      .setImage('https://cdn.discordapp.com/attachments/1445061018341605459/1481180038320754688/unnamed.jpg?ex=69b25fe8&is=69b10e68&hm=e58f9ca43497934da9e25fa3b418bf750cb01afe2b557655bb0cf8ab9f948964&')
       .setFooter({
         text: 'FLUX • IO  |  Last updated by Server Administration',
       })
