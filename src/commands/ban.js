@@ -2,9 +2,9 @@ const {
   SlashCommandBuilder, EmbedBuilder,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
 } = require('discord.js');
-const { isAdmin, isModerator, isOnlyModerator, ROLES } = require('../utils/permissions');
+const { isAdmin, isModerator } = require('../utils/permissions');
+const { logAction } = require('../utils/modLog');
 
-// pending requests: requestId -> { targetId, reason, days, requesterId, guildId }
 const pendingBans = new Map();
 
 module.exports = {
@@ -22,18 +22,16 @@ module.exports = {
   async execute(interaction) {
     await interaction.deferReply();
 
-    if (!isModerator(interaction.member)) {
+    if (!isModerator(interaction.member))
       return interaction.editReply({ content: '❌ هذا الأمر للـ Moderator والأعلى فقط.' });
-    }
 
     const target = interaction.options.getMember('member');
     const reason = interaction.options.getString('reason') ?? 'لم يُذكر سبب.';
-    const days = interaction.options.getInteger('days') ?? 0;
+    const days   = interaction.options.getInteger('days') ?? 0;
 
-    if (!target) return interaction.editReply({ content: '❌ العضو غير موجود.' });
+    if (!target)          return interaction.editReply({ content: '❌ العضو غير موجود.' });
     if (!target.bannable) return interaction.editReply({ content: '❌ لا أملك صلاحية حظر هذا العضو.' });
 
-    // ── إذا Admin أو Founder — ينفذ مباشرة ──────────────────────────────────
     if (isAdmin(interaction.member)) {
       const dmEmbed = new EmbedBuilder()
         .setTitle('🔨  تم حظرك')
@@ -44,13 +42,21 @@ module.exports = {
       await target.send({ embeds: [dmEmbed] }).catch(() => {});
       await target.ban({ deleteMessageDays: days, reason });
 
+      // ── تسجيل في الـ logs ──────────────────────────────────────────────
+      await logAction(interaction.guild, {
+        type:      'ban',
+        moderator: interaction.user,
+        target,
+        reason,
+      });
+
       const embed = new EmbedBuilder()
         .setTitle('🔨  تم الحظر')
         .addFields(
-          { name: 'العضو', value: `${target.user.tag}`, inline: true },
-          { name: 'المشرف', value: `${interaction.user}`, inline: true },
-          { name: 'السبب', value: reason },
-          { name: 'حذف الرسائل', value: `${days} يوم` }
+          { name: 'العضو',         value: `${target.user.tag}`,   inline: true },
+          { name: 'المشرف',        value: `${interaction.user}`,  inline: true },
+          { name: 'السبب',         value: reason },
+          { name: 'حذف الرسائل',  value: `${days} يوم` }
         )
         .setColor(0x8b0000)
         .setThumbnail(target.user.displayAvatarURL({ dynamic: true }))
@@ -60,49 +66,34 @@ module.exports = {
       return interaction.editReply({ embeds: [embed] });
     }
 
-    // ── Moderator — يرسل طلب موافقة ─────────────────────────────────────────
+    // Moderator — يحتاج موافقة
     const requestId = `ban_${Date.now()}_${interaction.user.id}`;
     pendingBans.set(requestId, {
-      targetId: target.id,
-      targetTag: target.user.tag,
-      reason,
-      days,
-      requesterId: interaction.user.id,
-      requesterTag: interaction.user.tag,
+      targetId: target.id, targetTag: target.user.tag,
+      reason, days,
+      requesterId: interaction.user.id, requesterTag: interaction.user.tag,
       guildId: interaction.guild.id,
     });
 
     const requestEmbed = new EmbedBuilder()
       .setTitle('🔔  طلب حظر — يحتاج موافقة')
-      .setDescription(`الـ Moderator **${interaction.user.tag}** يطلب حظر العضو **${target.user.tag}**`)
+      .setDescription(`الـ Moderator **${interaction.user.tag}** يطلب حظر **${target.user.tag}**`)
       .addFields(
-        { name: 'العضو', value: `${target} (${target.user.tag})`, inline: true },
-        { name: 'طلب بواسطة', value: `${interaction.user}`, inline: true },
-        { name: 'السبب', value: reason },
+        { name: 'العضو',    value: `${target} (${target.user.tag})`, inline: true },
+        { name: 'طلب بواسطة', value: `${interaction.user}`,         inline: true },
+        { name: 'السبب',    value: reason },
         { name: 'حذف الرسائل', value: `${days} يوم` }
       )
       .setColor(0xffa500)
       .setThumbnail(target.user.displayAvatarURL({ dynamic: true }))
-      .setFooter({ text: 'FLUX • IO  |  نظام الموافقات — للإدارة فقط' })
+      .setFooter({ text: 'FLUX • IO  |  نظام الموافقات' })
       .setTimestamp();
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`approve_ban_${requestId}`)
-        .setLabel('✅ موافقة وتنفيذ')
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(`reject_ban_${requestId}`)
-        .setLabel('❌ رفض')
-        .setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId(`approve_ban_${requestId}`).setLabel('✅ موافقة').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`reject_ban_${requestId}`).setLabel('❌ رفض').setStyle(ButtonStyle.Danger)
     );
 
-    await interaction.editReply({
-      content: `⏳ تم إرسال طلب الحظر للإدارة — بانتظار الموافقة.`,
-      embeds: [requestEmbed],
-      components: [row],
-    });
-
-    console.log(`[BAN REQUEST] ${target.user.tag} — requested by ${interaction.user.tag}`);
+    await interaction.editReply({ content: '⏳ تم إرسال الطلب للإدارة.', embeds: [requestEmbed], components: [row] });
   },
 };

@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { isAdmin } = require('../utils/permissions');
+const { logAction } = require('../utils/modLog');
 
 const warningsMap = new Map();
 
@@ -13,9 +14,8 @@ module.exports = {
   async execute(interaction) {
     await interaction.deferReply();
 
-    if (!isAdmin(interaction.member)) {
+    if (!isAdmin(interaction.member))
       return interaction.editReply({ content: '❌ هذا الأمر لـ **CORE Admin🛡** و **CORE Founder👑** فقط.' });
-    }
 
     const target = interaction.options.getMember('member');
     const reason = interaction.options.getString('reason');
@@ -28,19 +28,30 @@ module.exports = {
     const total = warningsMap.get(target.id).length;
 
     const dmEmbed = new EmbedBuilder()
-      .setTitle('⚠️ لقيت تحذير')
+      .setTitle('⚠️  لقيت تحذير')
       .setDescription(`لقيت تحذير في **${interaction.guild.name}**`)
-      .addFields({ name: 'السبب', value: reason }, { name: 'المشرف', value: interaction.user.tag }, { name: 'مجموع التحذيرات', value: `${total}` })
+      .addFields(
+        { name: 'السبب',           value: reason },
+        { name: 'المشرف',          value: interaction.user.tag },
+        { name: 'مجموع التحذيرات', value: `${total}` }
+      )
       .setColor(0xffa500).setTimestamp();
 
     await target.send({ embeds: [dmEmbed] }).catch(() => {});
 
+    await logAction(interaction.guild, {
+      type:      'warn',
+      moderator: interaction.user,
+      target,
+      reason: `${reason} (تحذير #${total})`,
+    });
+
     const embed = new EmbedBuilder()
       .setTitle('⚠️  تحذير صدر')
       .addFields(
-        { name: 'العضو', value: `${target}`, inline: true },
-        { name: 'المشرف', value: `${interaction.user}`, inline: true },
-        { name: 'السبب', value: reason },
+        { name: 'العضو',           value: `${target}`,            inline: true },
+        { name: 'المشرف',          value: `${interaction.user}`,  inline: true },
+        { name: 'السبب',           value: reason },
         { name: 'مجموع التحذيرات', value: `${total}` }
       )
       .setColor(0xffa500)
@@ -49,6 +60,5 @@ module.exports = {
       .setTimestamp();
 
     await interaction.editReply({ embeds: [embed] });
-    console.log(`[WARN] ${target.user.tag} warned by ${interaction.user.tag}`);
   },
 };
