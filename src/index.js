@@ -16,6 +16,8 @@ const path = require('path');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 
 // ─── Client Initialization ───────────────────────────────────────────────────
+const { Client, GatewayIntentBits, Collection } = require('discord.js');
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -23,6 +25,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildMessageThreads,
   ],
 });
 
