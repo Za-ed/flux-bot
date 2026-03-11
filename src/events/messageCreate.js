@@ -1,4 +1,4 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq-sdk');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const ASK_FLUX_CHANNEL_NAME = 'ask-flux';
@@ -10,8 +10,8 @@ const TIMEOUT_DURATION_MS = 5 * 60 * 1000;
 // ─── In-Memory Spam Store ─────────────────────────────────────────────────────
 const spamMap = new Map();
 
-// ─── Gemini Client ────────────────────────────────────────────────────────────
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// ─── Groq Client ─────────────────────────────────────────────────────────────
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // ─── Helper: Split long messages ─────────────────────────────────────────────
 function splitMessage(text, maxLength = 1900) {
@@ -52,31 +52,35 @@ async function sendTempWarning(channel, content, deleteAfterMs = 5000) {
   } catch { }
 }
 
-// ─── Helper: Query Gemini ─────────────────────────────────────────────────────
-async function queryGemini(userMessage) {
-  try {
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      systemInstruction:
-        'You are FLUX Bot, an expert AI coding assistant in the FLUX • IO developer Discord server. ' +
-        'Answer programming questions with precision and clarity. ' +
-        'Always format code using markdown code blocks with the correct language (e.g. ```js, ```python). ' +
-        'Be concise but thorough. Only answer questions related to software development and technology.',
-    });
+// ─── Helper: Query Groq ───────────────────────────────────────────────────────
+async function queryGroq(userMessage) {
+  const completion = await groq.chat.completions.create({
+    model: 'llama-3.3-70b-versatile',
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You are FLUX Bot, an expert AI coding assistant in the FLUX • IO developer Discord server. ' +
+          'Answer programming questions with precision and clarity. ' +
+          'Always format code using markdown code blocks with the correct language (e.g. ```js, ```python). ' +
+          'Be concise but thorough. Only answer questions related to software development and technology.',
+      },
+      {
+        role: 'user',
+        content: userMessage,
+      },
+    ],
+    max_tokens: 1500,
+    temperature: 0.7,
+  });
 
-    const result = await model.generateContent(userMessage);
-    const response = result.response;
-    const text = response.text();
+  const text = completion.choices[0]?.message?.content;
 
-    if (!text || text.trim().length === 0) {
-      throw new Error('Empty response from Gemini');
-    }
-
-    return text;
-  } catch (err) {
-    console.error('[AI] Gemini error details:', err);
-    throw err;
+  if (!text || text.trim().length === 0) {
+    throw new Error('Empty response from Groq');
   }
+
+  return text;
 }
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
@@ -88,7 +92,7 @@ module.exports = {
     if (message.author.bot) return;
     if (!message.guild) return;
 
-    const { author, member, channel, guild, content } = message;
+    const { author, member, channel, content } = message;
 
     // ══════════════════════════════════════════════════════════════════════════
     // SECTION 1 — ANTI-LINK
@@ -125,12 +129,14 @@ module.exports = {
       }
 
       if (userData.timestamps.length >= SPAM_THRESHOLD) {
-        console.log(`[AUTOMOD] Spam from ${author.tag}`);
         const idsToDelete = [...userData.messageIds];
         spamMap.delete(userId);
 
         for (const msgId of idsToDelete) {
-          await channel.messages.fetch(msgId).then((m) => m.delete().catch(() => {})).catch(() => {});
+          await channel.messages
+            .fetch(msgId)
+            .then((m) => m.delete().catch(() => {}))
+            .catch(() => {});
         }
 
         try {
@@ -148,24 +154,21 @@ module.exports = {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // SECTION 3 — AI ASSISTANT
+    // SECTION 3 — AI ASSISTANT (ask-flux)
     // ══════════════════════════════════════════════════════════════════════════
     if (channel.name === ASK_FLUX_CHANNEL_NAME) {
       const userQuestion = content.trim();
       if (!userQuestion || userQuestion.length < 2) return;
 
-      console.log(`[AI] Question from ${author.tag}: ${userQuestion.slice(0, 50)}...`);
+      console.log(`[AI] Question from ${author.tag}: ${userQuestion.slice(0, 60)}`);
 
-      // Typing indicator
-      await channel.sendTyping().catch(() => {});
-
-      // Keep typing alive for long responses
       const typingInterval = setInterval(() => {
         channel.sendTyping().catch(() => {});
       }, 5000);
+      await channel.sendTyping().catch(() => {});
 
       try {
-        const aiResponse = await queryGemini(userQuestion);
+        const aiResponse = await queryGroq(userQuestion);
         clearInterval(typingInterval);
 
         const chunks = splitMessage(aiResponse, 1900);
@@ -181,26 +184,12 @@ module.exports = {
         }
 
         console.log(`[AI] ✅ Replied to ${author.tag} (${chunks.length} chunk(s))`);
-
       } catch (err) {
         clearInterval(typingInterval);
-        console.error('[AI] Final error:', err.message);
-
-        // محاولة مع نموذج بديل
-        try {
-          console.log('[AI] Trying gemini-pro as fallback...');
-          const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-          const result = await model.generateContent(userQuestion);
-          const text = result.response.text();
-
-          await message.reply(text.slice(0, 1900));
-          console.log('[AI] ✅ Fallback worked with gemini-pro');
-        } catch (fallbackErr) {
-          console.error('[AI] Fallback also failed:', fallbackErr.message);
-          await message.reply(
-            '❌ عذراً، حدث خطأ في الاتصال بالذكاء الاصطناعي. حاول مجدداً بعد قليل.'
-          );
-        }
+        console.error('[AI] Groq error:', err.message);
+        await message.reply(
+          '❌ عذراً، حدث خطأ في الاتصال بالذكاء الاصطناعي. حاول مجدداً بعد قليل.'
+        );
       }
     }
   },
