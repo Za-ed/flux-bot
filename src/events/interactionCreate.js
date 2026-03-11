@@ -90,6 +90,8 @@ module.exports = {
     // ── توجيه تفاعلات الأزرار ─────────────────────────────────────────────
     if (interaction.isButton()) {
       const { customId, guild, user, member } = interaction;
+      const { handleSuggestVote } = require('../utils/suggestVote');
+if (await handleSuggestVote(interaction)) return;
 
       // ── أزرار فتح التذاكر ────────────────────────────────────────────────
       if (TICKET_TYPES[customId]) {

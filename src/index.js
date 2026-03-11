@@ -22,7 +22,11 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
+<<<<<<< HEAD
     
+=======
+    GatewayIntentBits.GuildMessageThreads,
+>>>>>>> ad64174 (التحديث الاكبر)
   ],
 });
 

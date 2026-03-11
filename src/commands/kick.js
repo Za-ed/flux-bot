@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { isAdmin } = require('../utils/permissions');
+const { logAction } = require('../utils/modLog');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -11,14 +12,13 @@ module.exports = {
   async execute(interaction) {
     await interaction.deferReply();
 
-    if (!isAdmin(interaction.member)) {
+    if (!isAdmin(interaction.member))
       return interaction.editReply({ content: '❌ هذا الأمر لـ **CORE Admin🛡** و **CORE Founder👑** فقط.' });
-    }
 
     const target = interaction.options.getMember('member');
     const reason = interaction.options.getString('reason') ?? 'لم يُذكر سبب.';
 
-    if (!target) return interaction.editReply({ content: '❌ العضو غير موجود.' });
+    if (!target)         return interaction.editReply({ content: '❌ العضو غير موجود.' });
     if (!target.kickable) return interaction.editReply({ content: '❌ لا أملك صلاحية طرد هذا العضو.' });
 
     const dmEmbed = new EmbedBuilder()
@@ -30,12 +30,19 @@ module.exports = {
     await target.send({ embeds: [dmEmbed] }).catch(() => {});
     await target.kick(reason);
 
+    await logAction(interaction.guild, {
+      type:      'kick',
+      moderator: interaction.user,
+      target,
+      reason,
+    });
+
     const embed = new EmbedBuilder()
       .setTitle('👢  تم الطرد')
       .addFields(
-        { name: 'العضو', value: `${target.user.tag}`, inline: true },
+        { name: 'العضو',  value: `${target.user.tag}`,  inline: true },
         { name: 'المشرف', value: `${interaction.user}`, inline: true },
-        { name: 'السبب', value: reason }
+        { name: 'السبب',  value: reason }
       )
       .setColor(0xff4444)
       .setThumbnail(target.user.displayAvatarURL({ dynamic: true }))
@@ -43,6 +50,5 @@ module.exports = {
       .setTimestamp();
 
     await interaction.editReply({ embeds: [embed] });
-    console.log(`[KICK] ${target.user.tag} kicked by ${interaction.user.tag}`);
   },
 };
