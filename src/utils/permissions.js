@@ -1,3 +1,6 @@
+// ─── utils/permissions.js ─────────────────────────────────────────────────────
+const { canUseCommand } = require('./permManager');
+
 // ─── Roles ────────────────────────────────────────────────────────────────────
 const ROLES = {
   FOUNDER:   'CORE Founder👑',
@@ -5,7 +8,6 @@ const ROLES = {
   MODERATOR: 'CORE Moderator🔧',
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function hasRole(member, ...roleNames) {
   return member.roles.cache.some((r) => roleNames.includes(r.name));
 }
@@ -15,9 +17,9 @@ function isAdmin(member)     { return hasRole(member, ROLES.FOUNDER, ROLES.ADMIN
 function isModerator(member) { return hasRole(member, ROLES.FOUNDER, ROLES.ADMIN, ROLES.MODERATOR); }
 
 function getRoleLevel(member) {
-  if (isFounder(member) && member.roles.cache.some(r => r.name === ROLES.FOUNDER)) return 3;
-  if (member.roles.cache.some(r => r.name === ROLES.ADMIN)) return 2;
-  if (member.roles.cache.some(r => r.name === ROLES.MODERATOR)) return 1;
+  if (member.roles.cache.some((r) => r.name === ROLES.FOUNDER))   return 3;
+  if (member.roles.cache.some((r) => r.name === ROLES.ADMIN))     return 2;
+  if (member.roles.cache.some((r) => r.name === ROLES.MODERATOR)) return 1;
   return 0;
 }
 
@@ -25,4 +27,12 @@ function isOnlyModerator(member) {
   return isModerator(member) && !isAdmin(member);
 }
 
-module.exports = { ROLES, isFounder, isAdmin, isModerator, isOnlyModerator, getRoleLevel };
+module.exports = {
+  ROLES,
+  isFounder,
+  isAdmin,
+  isModerator,
+  isOnlyModerator,
+  getRoleLevel,
+  canUseCommand, // ← من permManager
+};

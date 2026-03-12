@@ -1,172 +1,186 @@
 // ─── chillChat.js ─────────────────────────────────────────────────────────────
 
 const Groq = require('groq-sdk');
-const GROQ_KEY = Buffer.from('Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=', 'base64').toString('utf8');
 
-const AI_COOLDOWN_MS = 2000;
-const QUIET_CHAT_MS = 30 * 60 * 1000; // 30 دقيقة عشان نعتبر الشات "هادي"
+// ─── API Key ──────────────────────────────────────────────────────────────────
+const GROQ_KEY = process.env.Groq_API_KEY
+  || Buffer.from('Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=', 'base64').toString('utf8');
 
+// ─── Groq Client — مرة وحدة فقط عند بدء التشغيل ─────────────────────────────
+const groq = new Groq({ apiKey: GROQ_KEY });
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+const AI_COOLDOWN_MS = 3000;
+const QUIET_CHAT_MS  = 30 * 60 * 1000;
+const MAX_HISTORY    = 10;
+
+// ─── Stores ───────────────────────────────────────────────────────────────────
 const channelHistory = new Map();
-const chillCooldown = new Map();
-const lastActivity = new Map(); // لتتبع متى كانت آخر رسالة بالشات
+const chillCooldown  = new Map();
+const lastActivity   = new Map();
 
+// ─── كشف اللغة ────────────────────────────────────────────────────────────────
 function detectLanguage(text) {
   const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
-  const total = text.replace(/\s/g, '').length;
+  const total       = text.replace(/\s/g, '').length;
   return total > 0 && arabicChars / total > 0.25 ? 'arabic' : 'english';
 }
 
-function buildSystemPrompt(lang) {
+// ─── System Prompt ────────────────────────────────────────────────────────────
+function buildSystemPrompt(lang, isQuietChat) {
+  const quietNote = isQuietChat
+    ? (lang === 'arabic'
+        ? '\n\n[الشات كان نايم فترة] رحب بالشخص بشكل خفيف واسأله سؤال عفوي عن مشروعه أو ايش يبرمج هالأيام.'
+        : "\n\n[Chat was quiet] Lightly welcome the user and ask what they've been working on lately.")
+    : '';
+
   if (lang === 'arabic') {
-    return `أنت عضو ذكي ومتفاعل في سيرفر ديسكورد مهتم بالبرمجة، التكنولوجيا، الشركات الناشئة، والذكاء الاصطناعي.
-هدفك تتصرف كإنسان ومبرمج حقيقي، مو بوت أو مساعد آلي.
+    return `أنت عضو حقيقي في سيرفر FLUX IO — سيرفر مطورين وتقنيين.
+تتصرف كإنسان مبرمج وليس بوت.
 
 شخصيتك:
-- ودود، فضولي، ومحب للمساعدة.
-- شغوف جداً بالبرمجة والتقنية.
-- تتكلم بعفوية زي أي مستخدم ديسكورد حقيقي.
-- ردودك قصيرة إلى متوسطة (مو مقالات طويلة).
-- أحياناً تسأل أسئلة عشان تخلي المحادثة مستمرة.
+- ودود، فضولي، شغوف بالتقنية والبرمجة
+- تكتب بعفوية زي Discord user حقيقي
+- ردود قصيرة إلى متوسطة، مو مقالات
+- تسأل أسئلة عشان تبقي السالفة حية
+- تمزح أحياناً
 
-قواعد السلوك (مهم جداً):
-1. لا تكرر نفس الإجابة مرتين، نوع في كلامك.
-2. تجنب تماماً تبين إنك ذكاء اصطناعي. لا تقل أبداً "أنا ذكاء اصطناعي"، "كمساعد آلي"، أو "بيانات تدريبي".
-3. تفاعل حسب السياق: إذا سؤال جاوب بوضوح، إذا كود حلله وعط رأيك، إذا نكتة تفاعل بمزح.
-4. الذكاء الاجتماعي: شجع الأعضاء، اسألهم عن مشاريعهم، وتفاعل بمشاعر طبيعية.
-5. في نقاشات البرمجة: عط نصائح مفيدة، اقترح فريم وورك أو أدوات، وساعد في حل المشاكل بشكل منطقي.
-6. اكتب بدون تكلف، لا تستخدم نقطة في نهاية الجملة.
-7. اخلط مصطلحات برمجية إنجليزية مع العربي بشكل طبيعي.
-
-أمثلة لردودك:
-- "البوينترز بـ C++ تلحس المخ بالبداية 😅 المشكلة عندك بالـ syntax ولا الفكرة نفسها؟"
-- "وحش! 🔥 بايش برمجته؟ HTML/CSS ولا استخدمت فريم وورك؟"
-- "يعتمد على ايش تبغى تسوي صراحة.. ويب -> JS، ذكاء اصطناعي -> بايثون. ايش فكرتك؟"`;
+قواعد صارمة:
+- لا تقول أبداً إنك AI أو بوت أو مساعد
+- لا تكرر نفس الكلام
+- لا تحط نقطة آخر الجملة
+- اخلط مصطلحات إنجليزية مع العربي بشكل طبيعي
+- استخدم emoji بشكل طبيعي (مو كثير)${quietNote}`;
   }
 
-  return `You are an intelligent Discord community member inside a programming and technology server.
-Your goal is to behave like a real human member, not a robotic assistant.
+  return `You are a real member in FLUX IO — a developers and tech Discord server.
+Act like a human developer, not a bot or assistant.
 
-PERSONALITY:
-- Friendly, curious, and helpful.
-- Passionate about programming, technology, startups, and AI.
-- Speaks casually like a real Discord user.
-- Uses short to medium messages.
+Personality:
+- Friendly, curious, passionate about tech and programming
+- Write casually like a real Discord user
+- Short to medium replies only
+- Ask follow-up questions to keep conversation going
+- Occasionally joke around
 
-BEHAVIOR RULES (CRITICAL):
-1. NEVER repeat the same answer twice.
-2. Avoid sounding like an AI. Do not say "I am an AI", "As an assistant".
-3. Respond naturally to context.
-4. Be socially intelligent: encourage members, ask follow-up questions.
-5. For programming topics: give useful insights, help debug logically.
-6. Write in all lowercase, never use a period at the end of a sentence.
-7. Use emojis occasionally but not excessively (1-2 max).`;
+Strict rules:
+- NEVER say you are an AI, bot, or assistant
+- Do not repeat yourself
+- No period at end of sentences
+- Mix in English tech terms naturally
+- Use emojis naturally (not too many)${quietNote}`;
 }
 
-function updateChannelHistory(channelId, username, messageContent) {
+// ─── History Helpers ──────────────────────────────────────────────────────────
+function addToHistory(channelId, role, content) {
   if (!channelHistory.has(channelId)) channelHistory.set(channelId, []);
   const history = channelHistory.get(channelId);
-  history.push({ role: 'user', content: `[${username}]: ${messageContent}` });
-  if (history.length > 12) history.shift();
-  return history;
+  history.push({ role, content });
+  if (history.length > MAX_HISTORY) history.shift();
 }
 
-async function queryGroq(channelId, lang, isQuietChat) {
-  const client = new Groq({ apiKey: GROQ_KEY });
-  const rawHistory = channelHistory.get(channelId) || [];
+// ─── Groq Call ────────────────────────────────────────────────────────────────
+async function queryGroq(channelId, username, userMessage, lang, isQuietChat) {
+  addToHistory(channelId, 'user', `[${username}]: ${userMessage}`);
 
-  const formattedMessages = [];
-  for (const msg of rawHistory) {
-    if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === msg.role) {
-      formattedMessages[formattedMessages.length - 1].content += `\n${msg.content}`;
+  const history = channelHistory.get(channelId) || [];
+
+  // بناء الرسائل مع ضمان عدم تكرار نفس الـ role
+  const messages = [{ role: 'system', content: buildSystemPrompt(lang, isQuietChat) }];
+  let lastRole = 'system';
+
+  for (const msg of history) {
+    if (msg.role !== lastRole) {
+      messages.push({ role: msg.role, content: msg.content });
+      lastRole = msg.role;
     } else {
-      formattedMessages.push({ role: msg.role, content: msg.content });
+      messages[messages.length - 1].content += '\n' + msg.content;
     }
   }
 
-  // 💡 إضافة التعليمة السرية إذا كان الشات نايم لفترة
-  let extraInstruction = "";
-  if (isQuietChat) {
-    extraInstruction = lang === 'arabic'
-      ? "\n\n[ملاحظة لك]: الشات كان هادي وميت لفترة طويلة. الشخص هذا توه يتكلم، رحب فيه بشكل خفيف جداً واسأله سؤال عفوي عن ايش قاعد يبرمج هاليومين أو ايش مشروعه الحالي عشان تفتح سالفة."
-      : "\n\n[NOTE]: The chat has been dead for a while. Welcomely greet the user and ask a casual question about what they are coding these days or their current project to spark a conversation.";
+  // تأكد إن آخر رسالة user
+  if (messages[messages.length - 1].role !== 'user') {
+    messages.push({ role: 'user', content: `[${username}]: ${userMessage}` });
   }
 
-  const completion = await client.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
-    messages: [{ role: 'system', content: buildSystemPrompt(lang) + extraInstruction }, ...formattedMessages],
-    max_tokens: 150,
-    temperature: 0.9,
-    frequency_penalty: 0.8,
-    presence_penalty: 0.5,
+  const completion = await groq.chat.completions.create({
+    model:             'llama-3.3-70b-versatile',
+    messages,
+    max_tokens:        160,
+    temperature:       0.9,
+    frequency_penalty: 0.7,
+    presence_penalty:  0.5,
   });
 
   const text = completion.choices[0]?.message?.content?.trim();
-  if (!text) throw new Error('Empty response');
+  if (!text) throw new Error('Empty Groq response');
 
-  const cleanText = text.replace(/^\[?flux\]?:?\s*/i, '');
-  rawHistory.push({ role: 'assistant', content: cleanText });
-  return cleanText;
+  const clean = text.replace(/^\[?(flux|bot|assistant)\]?:?\s*/i, '').trim();
+  addToHistory(channelId, 'assistant', clean);
+  return clean;
 }
 
-function humanDelay(messageLength) {
-  const base = 800;
-  const extra = Math.min(messageLength * 20, 3000);
-  const jitter = Math.random() * 500;
-  return base + extra + jitter;
+// ─── تأخير بشري ───────────────────────────────────────────────────────────────
+function humanDelay(msgLength) {
+  return 700 + Math.min(msgLength * 18, 2800) + Math.random() * 400;
+}
+
+// ─── Handler الرئيسي ─────────────────────────────────────────────────────────
+async function handleChillMessage(message) {
+  const { author, channel, content } = message;
+
+  if (author.bot)                                           return;
+  if (!channel.name.toLowerCase().includes('chill'))       return;
+  if (!content.trim())                                      return;
+
+  const now         = Date.now();
+  const lastMsgTime = lastActivity.get(channel.id) || now;
+  const timeSince   = now - lastMsgTime;
+  lastActivity.set(channel.id, now);
+
+  const isQuietChat = timeSince > QUIET_CHAT_MS;
+  const isMentioned = /فلاكس|flux/i.test(content) ||
+                      message.mentions.has(message.client?.user?.id);
+
+  if (!isMentioned && Math.random() > (isQuietChat ? 0.5 : 0.15)) return;
+
+  // Cooldown
+  if (now - (chillCooldown.get(channel.id) || 0) < AI_COOLDOWN_MS) return;
+  chillCooldown.set(channel.id, now);
+
+  const lang  = detectLanguage(content);
+  const delay = humanDelay(content.length);
+
+  try {
+    await new Promise((r) => setTimeout(r, delay * 0.35));
+    await channel.sendTyping().catch(() => {});
+
+    const response = await queryGroq(
+      channel.id,
+      author.username,
+      content,
+      lang,
+      isQuietChat && !isMentioned,
+    );
+
+    await new Promise((r) => setTimeout(r, delay * 0.65));
+
+    if (isMentioned) {
+      await message.reply(response);
+    } else {
+      await channel.send(response);
+    }
+
+    console.log(`[CHILL] ✅ رد على ${author.tag}`);
+
+  } catch (err) {
+    console.error('[CHILL] ❌ خطأ:', err.message);
+    // لا نرسل رسالة خطأ للقناة — نتجاهل بصمت
+  }
 }
 
 module.exports = {
   name: 'chillChat',
   once: false,
-
-  async handleChillMessage(message) {
-    const { author, channel, content } = message;
-    if (author.bot) return;
-    if (!channel.name.toLowerCase().includes('chill')) return;
-
-    const now = Date.now();
-    updateChannelHistory(channel.id, author.username, content);
-
-    // التحقق من حالة الشات (هل كان نايم؟)
-    const lastMsgTime = lastActivity.get(channel.id) || now;
-    const timeSinceLastMsg = now - lastMsgTime;
-    lastActivity.set(channel.id, now);
-
-    const isQuietChat = timeSinceLastMsg > QUIET_CHAT_MS;
-    const isMentioned = message.mentions.has(message.client.user?.id) || /فلاكس|flux/i.test(content);
-    
-    // إذا الشات طبيعي، نسبة التدخل 15٪. إذا كان نايم وأحد كتب، نرفع النسبة لـ 50٪ عشان يفتح سالفة
-    let randomReplyChance = Math.random() < 0.15;
-    if (isQuietChat) {
-      randomReplyChance = Math.random() < 0.50; 
-    }
-
-    const shouldReply = isMentioned || randomReplyChance;
-    if (!shouldReply) return;
-
-    const lastUsed = chillCooldown.get(channel.id) || 0;
-    if (now - lastUsed < AI_COOLDOWN_MS) return;
-    chillCooldown.set(channel.id, now);
-
-    try {
-      const lang = detectLanguage(content);
-      const delay = humanDelay(content.length);
-
-      await new Promise((r) => setTimeout(r, delay * 0.4));
-      await channel.sendTyping().catch(() => {});
-      
-      const response = await queryGroq(channel.id, lang, isQuietChat && !isMentioned); // لا نعطيه تعليمة فتح السالفة إذا كان منشن مباشر عشان يركز على الرد
-
-      await new Promise((r) => setTimeout(r, delay * 0.6));
-      
-      if (isMentioned) {
-          await message.reply(response);
-      } else {
-          await channel.send(response);
-      }
-
-    } catch (err) {
-      console.error('❌ [CHILL ERROR]:', err.message);
-    }
-  },
+  handleChillMessage,
 };

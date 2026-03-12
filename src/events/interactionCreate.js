@@ -139,6 +139,16 @@ module.exports = {
     if (interaction.isChatInputCommand()) {
       const command = client.commands.get(interaction.commandName);
       if (!command) return;
+
+      // ── فحص الصلاحيات ────────────────────────────────────────────────
+      const { canUseCommand } = require('../utils/permManager');
+      if (!canUseCommand(interaction.member, interaction.commandName)) {
+        return interaction.reply({
+          content: '❌ ما عندك صلاحية استخدام هذا الأمر.',
+          ephemeral: true,
+        });
+      }
+
       try {
         await command.execute(interaction);
       } catch (error) {
