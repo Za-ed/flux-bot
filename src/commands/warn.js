@@ -1,115 +1,103 @@
+// ─── warn.js ──────────────────────────────────────────────────────────────────
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { isAdmin } = require('../utils/permissions');
+const { isAdmin }   = require('../utils/permissions');
 const { logAction } = require('../utils/modLog');
 const fs   = require('fs');
 const path = require('path');
 
-// ─── Persistent Warnings Storage ─────────────────────────────────────────────
-const WARNINGS_FILE = path.join(__dirname, '../data/warnings.json');
+const DATA_FILE = path.join(__dirname, '..', 'data', 'warnings.json');
 
 function loadWarnings() {
   try {
-    if (!fs.existsSync(WARNINGS_FILE)) return {};
-    return JSON.parse(fs.readFileSync(WARNINGS_FILE, 'utf8'));
-  } catch {
-    return {};
-  }
+    if (!fs.existsSync(DATA_FILE)) return {};
+    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+  } catch { return {}; }
 }
 
 function saveWarnings(data) {
   try {
-    const dir = path.dirname(WARNINGS_FILE);
+    const dir = path.dirname(DATA_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(WARNINGS_FILE, JSON.stringify(data, null, 2), 'utf8');
-  } catch (err) {
-    console.error('[WARN] Failed to save warnings:', err.message);
-  }
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch {}
 }
 
-function getUserWarnings(userId) {
-  const data = loadWarnings();
-  return data[userId] ?? [];
+function addWarning(guildId, userId, warn) {
+  const db  = loadWarnings();
+  const key = `${guildId}:${userId}`;
+  if (!db[key]) db[key] = [];
+  db[key].push(warn);
+  saveWarnings(db);
+  return db[key].length;
 }
-
-function addWarning(userId, entry) {
-  const data = loadWarnings();
-  if (!data[userId]) data[userId] = [];
-  data[userId].push(entry);
-  saveWarnings(data);
-  return data[userId].length;
-}
-// ─────────────────────────────────────────────────────────────────────────────
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('warn')
     .setDescription('تحذير عضو في السيرفر.')
-    .addUserOption((opt) =>
-      opt.setName('member').setDescription('العضو المراد تحذيره.').setRequired(true)
-    )
-    .addStringOption((opt) =>
-      opt.setName('reason').setDescription('سبب التحذير.').setRequired(true)
-    ),
+    .addUserOption((o) => o.setName('member').setDescription('العضو المراد تحذيره').setRequired(true))
+    .addStringOption((o) => o.setName('reason').setDescription('سبب التحذير').setRequired(true)),
 
   async execute(interaction) {
     await interaction.deferReply();
 
     if (!isAdmin(interaction.member))
-      return interaction.editReply({ content: '❌ هذا الأمر لـ **CORE Admin🛡** و **CORE Founder👑** فقط.' });
+      return interaction.editReply({ content: '❌ هذا الأمر للإدارة فقط.' });
 
     const target = interaction.options.getMember('member');
     const reason = interaction.options.getString('reason');
 
-    if (!target)
-      return interaction.editReply({ content: '❌ العضو غير موجود.' });
-    if (target.id === interaction.user.id)
-      return interaction.editReply({ content: '❌ لا تقدر تحذر نفسك.' });
-    if (target.user.bot)
-      return interaction.editReply({ content: '❌ لا تقدر تحذر بوت.' });
+    if (!target)                           return interaction.editReply({ content: '❌ العضو غير موجود.' });
+    if (target.id === interaction.user.id) return interaction.editReply({ content: '❌ ما تقدر تحذر نفسك.' });
+    if (target.user.bot)                   return interaction.editReply({ content: '❌ ما تقدر تحذر بوت.' });
 
-    // ✅ حفظ دائم في ملف JSON
-    const total = addWarning(target.id, {
+    const total = addWarning(interaction.guild.id, target.id, {
       reason,
-      date:      new Date().toISOString(),
-      moderator: interaction.user.tag,
-      guildId:   interaction.guild.id,
+      moderator:   interaction.user.tag,
+      moderatorId: interaction.user.id,
+      date:        new Date().toISOString(),
     });
 
     // DM للعضو
-    const dmEmbed = new EmbedBuilder()
-      .setTitle('⚠️  لقيت تحذير')
-      .setDescription(`لقيت تحذير في **${interaction.guild.name}**`)
-      .addFields(
-        { name: 'السبب',           value: reason },
-        { name: 'المشرف',          value: interaction.user.tag },
-        { name: 'مجموع التحذيرات', value: `${total}` }
-      )
-      .setColor(0xffa500)
-      .setTimestamp();
-
-    await target.send({ embeds: [dmEmbed] }).catch(() => {});
-
-    await logAction(interaction.guild, {
-      type:      'warn',
-      moderator: interaction.user,
-      target,
-      reason:    `${reason} (تحذير #${total})`,
+    await target.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('⚠️  لقيت تحذير')
+          .setDescription(`لقيت تحذير في **${interaction.guild.name}**`)
+          .addFields(
+            { name: '📝  السبب',           value: reason,               inline: false },
+            { name: '🛡️  المشرف',          value: interaction.user.tag, inline: true  },
+            { name: '🔢  مجموع تحذيراتك',  value: `${total} تحذير`,     inline: true  },
+          )
+          .setColor(0xffa500)
+          .setFooter({ text: 'FLUX • IO  |  نظام التحذيرات' })
+          .setTimestamp(),
+      ],
     }).catch(() => {});
 
+    // Mod Log
+    await logAction(interaction.guild, {
+      type: 'warn', moderator: interaction.user, target,
+      reason: `${reason} (تحذير #${total})`,
+    }).catch(() => {});
+
+    // رد في القناة
     const embed = new EmbedBuilder()
       .setTitle('⚠️  تحذير صدر')
       .addFields(
-        { name: 'العضو',           value: `${target}`,           inline: true },
-        { name: 'المشرف',          value: `${interaction.user}`, inline: true },
-        { name: 'السبب',           value: reason },
-        { name: 'مجموع التحذيرات', value: `${total}` }
+        { name: '👤  العضو',           value: `${target}`,           inline: true  },
+        { name: '🛡️  المشرف',          value: `${interaction.user}`, inline: true  },
+        { name: '📝  السبب',           value: reason,                inline: false },
+        { name: '🔢  مجموع التحذيرات', value: `**${total}** تحذير`,  inline: true  },
       )
-      .setColor(0xffa500)
+      .setColor(total >= 3 ? 0xff4444 : 0xffa500)
       .setThumbnail(target.user.displayAvatarURL({ dynamic: true }))
       .setFooter({ text: 'FLUX • IO  |  نظام التحذيرات' })
       .setTimestamp();
 
+    if (total >= 3)
+      embed.setDescription(`🚨 **تنبيه:** ${target} وصل لـ **${total} تحذيرات!**`);
+
     await interaction.editReply({ embeds: [embed] });
-    console.log(`[WARN] ${target.user.tag} warned by ${interaction.user.tag} — #${total}`);
   },
 };
