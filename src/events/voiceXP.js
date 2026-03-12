@@ -1,92 +1,75 @@
-// ─── voiceXP.js ───────────────────────────────────────────────────────────────
-// ✅ يستخدم leveling.addXP() بدل الكتابة المباشرة على xp.json
+// ─── events/voiceXP.js ────────────────────────────────────────────────────────
+const { addVoiceXP }                      = require('../utils/xpSystem');
+const { updateTierRole, announceLevelUp } = require('./leveling');
 
-const fs   = require('fs');
-const path = require('path');
-
-const DATA_FILE  = path.join(__dirname, '..', 'data', 'voiceTime.json');
-const XP_PER_MIN = 10;
-
-// ─── Storage ──────────────────────────────────────────────────────────────────
-function load() {
-  try {
-    if (!fs.existsSync(DATA_FILE)) return {};
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  } catch { return {}; }
-}
-
-function save(data) {
-  try {
-    const dir = path.dirname(DATA_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
-  } catch (err) { console.error('[VOICE-XP] فشل الحفظ:', err.message); }
-}
-
-let voiceData = load();
-const inVoice = new Map(); // `${guildId}-${userId}` -> joinTimestamp
+const inVoice     = new Map(); // key → joinTimestamp
+const voiceTimers = new Map(); // key → intervalId
 
 module.exports = {
   name: 'voiceStateUpdate',
   once: false,
 
   async execute(oldState, newState) {
-    const userId  = newState.id;
-    const guildId = newState.guild.id;
-    const key     = `${guildId}-${userId}`;
     const member  = newState.member || oldState.member;
+    if (!member || member.user.bot) return;
 
-    if (member?.user?.bot) return;
+    const userId  = member.id;
+    const guildId = member.guild.id;
+    const key     = `${guildId}-${userId}`;
 
-    // ── دخل الصوت ──────────────────────────────────────────────────────────
+    // ── دخل الصوت ─────────────────────────────────────────────────────────
     if (!oldState.channelId && newState.channelId) {
       inVoice.set(key, Date.now());
-      console.log(`[VOICE-XP] ${member?.user?.tag} دخل الصوت`);
+
+      // كل دقيقة يعطي XP
+      const timer = setInterval(async () => {
+        const current = member.guild.members.cache.get(userId);
+        if (!current?.voice?.channelId) {
+          clearInterval(timer);
+          voiceTimers.delete(key);
+          return;
+        }
+
+        const result = await addVoiceXP(guildId, userId);
+        if (!result) return;
+
+        if (result.leveled) {
+          await updateTierRole(current, result.user.level);
+          await announceLevelUp(member.guild, current, result.user.level - 1, result.user.level);
+        }
+      }, 60 * 1000);
+
+      voiceTimers.set(key, timer);
+      console.log(`[VOICE-XP] ${member.user.tag} دخل الصوت`);
     }
 
-    // ── خرج من الصوت ───────────────────────────────────────────────────────
+    // ── خرج من الصوت ──────────────────────────────────────────────────────
     if (oldState.channelId && !newState.channelId) {
+      // أوقف الـ interval
+      const timer = voiceTimers.get(key);
+      if (timer) { clearInterval(timer); voiceTimers.delete(key); }
+
+      // احسب الوقت الكلي
       const joinTime = inVoice.get(key);
-      if (!joinTime) return;
-      inVoice.delete(key);
-
-      const minutesSpent = Math.floor((Date.now() - joinTime) / 60000);
-      if (minutesSpent < 1) return;
-
-      // حفظ الوقت الكلي
-      if (!voiceData[guildId])         voiceData[guildId] = {};
-      if (!voiceData[guildId][userId]) voiceData[guildId][userId] = { totalMinutes: 0 };
-      voiceData[guildId][userId].totalMinutes += minutesSpent;
-      save(voiceData);
-
-      // ✅ استخدام addXP() المركزية — لا كتابة مباشرة على xp.json
-      const xpGained = minutesSpent * XP_PER_MIN;
-      try {
-        const leveling  = require('./leveling');
-        const { newLevel, oldLevel } = leveling.addXP(guildId, userId, xpGained);
-        console.log(`[VOICE-XP] ${member?.user?.tag} كسب ${xpGained} XP (${minutesSpent} دقيقة)`);
-
-        // إشعار ترقية لو ارتقى
-        if (newLevel > oldLevel) {
-          const guild = newState.guild;
-          const levelUpChannel = guild.channels.cache.find((c) => c.name === 'general');
-          if (levelUpChannel) {
-            await levelUpChannel.send(`🎉 ${member} وصل للمستوى **${newLevel}** بفضل الصوت! 🎙️`).catch(() => {});
-          }
-        }
-      } catch (err) {
-        console.error('[VOICE-XP] خطأ XP:', err.message);
+      if (joinTime) {
+        const minutes = Math.floor((Date.now() - joinTime) / 60000);
+        inVoice.delete(key);
+        console.log(`[VOICE-XP] ${member.user.tag} خرج — ${minutes} دقيقة`);
       }
 
       // تحديث مهام يومية
       try {
         const { updateProgress } = require('./dailyTasks');
-        updateProgress(guildId, userId, 'voice', minutesSpent);
+        const minutes = joinTime ? Math.floor((Date.now() - joinTime) / 60000) : 0;
+        if (minutes > 0) updateProgress(guildId, userId, 'voice', minutes);
       } catch {}
     }
   },
 
-  getTotalMinutes(guildId, userId) {
-    return voiceData[guildId]?.[userId]?.totalMinutes ?? 0;
+  // للاستخدام في rank card
+  getVoiceMinutes(guildId, userId) {
+    const key      = `${guildId}-${userId}`;
+    const joinTime = inVoice.get(key);
+    return joinTime ? Math.floor((Date.now() - joinTime) / 60000) : 0;
   },
 };

@@ -42,7 +42,13 @@ module.exports = {
     // ── توليد البطاقة ────────────────────────────────────────────────────
     const avatarURL = target.user.displayAvatarURL({ extension: 'png', size: 256 });
 
-    const cardBuffer = await generateRankCard({
+await interaction.reply({ files: [attachment] });
+
+
+
+   
+const rankBuffer = await generateRankCard({
+
       username:    target.user.username,
       displayName: target.displayName,
       avatarURL,
@@ -54,7 +60,7 @@ module.exports = {
       badges,
     });
 
-    const attachment = new AttachmentBuilder(cardBuffer, { name: 'rank.png' });
+    const attachment = new AttachmentBuilder(rankBuffer, { name: 'rank.gif' });
 
     await interaction.editReply({
       content: `${tier.emoji} **${target.displayName}** — ${tier.name} • مستوى ${level}`,
