@@ -1,82 +1,64 @@
-// ─── rank.js ──────────────────────────────────────────────────────────────────
+// ─── commands/rank.js ─────────────────────────────────────────────────────────
 const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
+const { generateRankCard, getTier }  = require('../utils/rankCard');
+const { getUserLevel, getLeaderboard, xpForLevel } = require('../events/leveling');
+const { getUserBadges } = require('../utils/badges');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('rank')
-    .setDescription('اعرض بطاقة رتبتك أو رتبة عضو آخر.')
-    .addUserOption((opt) =>
-      opt.setName('member').setDescription('العضو').setRequired(false)
+    .setDescription('اعرض بطاقة رانكك أو رانك أي عضو.')
+    .addUserOption((o) =>
+      o.setName('member').setDescription('العضو — اتركه فاضي لرانكك أنت').setRequired(false)
     ),
 
   async execute(interaction) {
-    // ✅ deferReply أول شيء — يعطي البوت 15 دقيقة بدل 3 ثواني
+    await interaction.deferReply();
+
+    const target = interaction.options.getMember('member') ?? interaction.member;
+    const { guild } = interaction;
+
+    // ── بيانات الـ XP ─────────────────────────────────────────────────────
+    const userData = getUserLevel(guild.id, target.id);
+    const { level, xp } = userData;
+    const xpNeeded  = xpForLevel(level + 1);
+    const tier      = getTier(level);
+
+    // ── الترتيب في اللوحة ─────────────────────────────────────────────────
+    const leaderboard = getLeaderboard(guild.id, 1000);
+    const rankPos     = leaderboard.findIndex((u) => u.userId === target.id) + 1;
+
+    // ── الشارات ───────────────────────────────────────────────────────────
+    let badges = [];
+    try { badges = getUserBadges(guild.id, target.id); } catch {}
+
+    // ── Voice Minutes ─────────────────────────────────────────────────────
+    let voiceMinutes = 0;
     try {
-      await interaction.deferReply();
-    } catch {
-      return; // Interaction expired قبل ما نوصلها
-    }
+      const voiceData = require('../data/voiceTime.json');
+      voiceMinutes = Math.floor((voiceData?.[guild.id]?.[target.id] || 0) / 60);
+    } catch {}
 
-    try {
-      // ✅ Lazy requires — لو أي ملف فيه مشكلة، نعرف مباشرة
-      const leveling = require('../events/leveling');
-      const voiceXP  = require('../events/voiceXP');
-      const { formatBadges }     = require('../utils/badges');
-      const { generateRankCard } = require('../utils/rankCard');
-      const { AttachmentBuilder: AB } = require('discord.js');
+    // ── توليد البطاقة ────────────────────────────────────────────────────
+    const avatarURL = target.user.displayAvatarURL({ extension: 'png', size: 256 });
 
-      const target   = interaction.options.getMember('member') ?? interaction.member;
-      const user     = target.user;
-      const guildId  = interaction.guild.id;
+    const cardBuffer = await generateRankCard({
+      username:    target.user.username,
+      displayName: target.displayName,
+      avatarURL,
+      level,
+      currentXP:  xp,
+      xpForNext:  xpNeeded,
+      rank:        rankPos || '?',
+      voiceMinutes,
+      badges,
+    });
 
-      const userData  = leveling.getUserData(guildId, user.id);
-      const level     = leveling.getLevelFromXp(userData.xp);
-      const currentXp = leveling.getXpInCurrentLevel(userData.xp);
-      const neededXp  = leveling.xpForLevel(level + 1);
+    const attachment = new AttachmentBuilder(cardBuffer, { name: 'rank.png' });
 
-      const lb   = leveling.getLeaderboard(guildId, 100);
-      const rank = lb.findIndex((e) => e.userId === user.id) + 1;
-
-      const voiceMins = voiceXP.getTotalMinutes(guildId, user.id);
-      const badges    = formatBadges(guildId, user.id);
-
-      const hexColor     = target.displayHexColor;
-      const isDefault    = !hexColor || hexColor === '#000000' || hexColor === '#ffffff';
-      const accentColor  = isDefault ? '#1e90ff' : hexColor;
-
-      try {
-        const buffer = await generateRankCard({
-          username:     user.username,
-          avatarURL:    user.displayAvatarURL({ extension: 'png', size: 256 }),
-          level,
-          currentXp,
-          neededXp,
-          totalXp:      userData.xp,
-          rank:         rank || '—',
-          voiceMinutes: voiceMins,
-          badges,
-          accentColor,
-        });
-
-        const file = new AttachmentBuilder(buffer, { name: `rank-${user.id}.png` });
-        await interaction.editReply({ files: [file] });
-
-      } catch (canvasErr) {
-        // Canvas فشل — fallback نصي
-        console.error('[RANK] Canvas error:', canvasErr.message);
-        await interaction.editReply({
-          content:
-            `📊 **${user.username}**\n` +
-            `🏅 المستوى: **${level}** | ⭐ XP: **${userData.xp}** | 🏆 الترتيب: **#${rank || '—'}**\n` +
-            `🎙️ وقت الصوت: **${voiceMins} دقيقة**`,
-        });
-      }
-
-    } catch (err) {
-      console.error('[RANK] Fatal error:', err);
-      try {
-        await interaction.editReply({ content: `❌ حصل خطأ: \`${err.message}\`` });
-      } catch {}
-    }
+    await interaction.editReply({
+      content: `${tier.emoji} **${target.displayName}** — ${tier.name} • مستوى ${level}`,
+      files:   [attachment],
+    });
   },
 };
