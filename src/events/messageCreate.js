@@ -241,6 +241,24 @@ module.exports = {
 
         const { author, member, channel, content } = message;
 
+        // ─── [الجديد] إضافة الـ XP عند إرسال رسالة ───
+        try {
+            // نتحقق أن الرسالة ليست أمراً أو رابطاً (اختياري)
+            if (!content.startsWith('!') && !/https?:\/\//i.test(content)) {
+                const result = await addMessageXP(message.guild.id, author.id);
+                
+                // إذا ارتفع مستوى العضو (Level Up)
+                if (result && result.leveled) {
+                    const { updateTierRole, announceLevelUp } = require('./leveling');
+                    await updateTierRole(member, result.user.level); // تحديث رتبته
+                    await announceLevelUp(message.guild, member, result.user.level - 1, result.user.level); // إرسال التهنئة
+                }
+            }
+        } catch (err) { 
+            console.error('[XP ERROR]', err.message); 
+        }
+        // ────────────────────────────────────────────
+
         // ── الوحدات الخارجية ──────────────────────────────────────────────────
         // ملاحظة: chillChat.js يعمل كـ event مستقل — لا تستدعيه هنا تجنباً للتكرار
         try {
