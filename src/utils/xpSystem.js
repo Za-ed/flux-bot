@@ -140,36 +140,36 @@ async function getUserData(guildId, userId) {
 // دالة إضافة XP يدوياً من قبل الإدارة
 async function addManualXP(guildId, userId, amount) {
     const col = await connect();
-    if (!col) return null;
+    if (!col) throw new Error('قاعدة البيانات غير متصلة');
 
-    // جلب بيانات العضو الحالية
-    const user = await col.findOne({ guild_id: guildId, user_id: userId }) || {
-        guild_id: guildId,
-        user_id: userId,
-        xp: 0,
-        level: 0,
-        total_xp: 0
-    };
+    // تحديث ذري وسريع جداً
+    const result = await col.findOneAndUpdate(
+        { guild_id: guildId, user_id: userId },
+        { 
+            $inc: { xp: amount, total_xp: amount },
+            $setOnInsert: { created_at: Date.now(), level: 0 }
+        },
+        { upsert: true, returnDocument: 'after' }
+    );
 
-    // إضافة النقاط
-    user.xp += amount;
-    user.total_xp += amount;
-
-    // فحص الترقية (Level Up)
+    let user = result;
     let leveled = false;
-    while (user.xp >= xpForLevel(user.level + 1)) {
-        user.xp -= xpForLevel(user.level + 1);
-        user.level += 1;
+    let currentLevel = user.level || 0;
+
+    // حساب الترقية
+    while (user.xp >= xpForLevel(currentLevel + 1)) {
+        user.xp -= xpForLevel(currentLevel + 1);
+        currentLevel++;
         leveled = true;
     }
 
-    // حفظ التعديلات
-    const { _id, ...data } = user;
-    await col.updateOne(
-        { guild_id: guildId, user_id: userId },
-        { $set: data },
-        { upsert: true }
-    );
+    if (leveled) {
+        await col.updateOne(
+            { guild_id: guildId, user_id: userId },
+            { $set: { level: currentLevel, xp: user.xp } }
+        );
+        user.level = currentLevel;
+    }
 
     return { leveled, user };
 }
