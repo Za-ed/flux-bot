@@ -137,10 +137,48 @@ async function getUserData(guildId, userId) {
     return await col.findOne({ guild_id: guildId, user_id: userId });
 }
 
+// دالة إضافة XP يدوياً من قبل الإدارة
+async function addManualXP(guildId, userId, amount) {
+    const col = await connect();
+    if (!col) return null;
+
+    // جلب بيانات العضو الحالية
+    const user = await col.findOne({ guild_id: guildId, user_id: userId }) || {
+        guild_id: guildId,
+        user_id: userId,
+        xp: 0,
+        level: 0,
+        total_xp: 0
+    };
+
+    // إضافة النقاط
+    user.xp += amount;
+    user.total_xp += amount;
+
+    // فحص الترقية (Level Up)
+    let leveled = false;
+    while (user.xp >= xpForLevel(user.level + 1)) {
+        user.xp -= xpForLevel(user.level + 1);
+        user.level += 1;
+        leveled = true;
+    }
+
+    // حفظ التعديلات
+    const { _id, ...data } = user;
+    await col.updateOne(
+        { guild_id: guildId, user_id: userId },
+        { $set: data },
+        { upsert: true }
+    );
+
+    return { leveled, user };
+}
+
 module.exports = {
     init: connect,
     addMessageXP,
     addInviteXP,
+    addManualXP,
     claimDaily,
     getLeaderboard,
     xpForLevel,
