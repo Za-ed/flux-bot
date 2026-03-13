@@ -1,6 +1,8 @@
-const { handleCodeRun }       = require('../utils/codeRunner');
-const { handleChillMessage }  = require('../utils/chillChat');
-const { handleGamingMessage } = require('../utils/gamingCorner');
+// ✅ تصحيح مسارات الملفات المطلوبة 
+const { handleCodeRun }       = require('./codeRunner'); // كما كان لديك أساساً
+const { handleChillMessage }  = require('./chillChat');  // كما كان لديك أساساً
+const { handleGamingMessage } = require('./gamingCorner'); // تم تعديله لـ ./ لأن كلاهما بـ events
+const { trackMessage }        = require('../utils/dailyReport');
 const Groq = require('groq-sdk');
 
 // ─── Key ──────────────────────────────────────────────────────────────────────
@@ -241,12 +243,11 @@ module.exports = {
         try {
             if (typeof handleCodeRun       === 'function') await handleCodeRun(message);
             if (typeof handleChillMessage  === 'function') await handleChillMessage(message);
-            if (typeof handleGamingMessage === 'function') await handleGamingMessage(message); // ✅ تفعيل الألعاب
+            if (typeof handleGamingMessage === 'function') await handleGamingMessage(message); 
         } catch (err) { console.error('[MODULE ERROR]', err.message); }
 
         // ── إحصاءات يومية ────────────────────────────────────────────────────
         try {
-            const { trackMessage } = require('../utils/dailyReport');
             if (typeof trackMessage === 'function') trackMessage(message.guild.id, author.id);
         } catch {}
 

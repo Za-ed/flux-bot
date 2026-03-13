@@ -1,9 +1,10 @@
 // ─── gamingCorner.js ──────────────────────────────────────────────────────────
 const { EmbedBuilder } = require('discord.js');
-const { updateProgress } = require('./dailyTasks');
-const { checkStatBadges } = require('./badges');
-const { addManualXP } = require('./xpSystem'); // ✅ تم الاعتماد على MongoDB
-const { updateTierRole, announceLevelUp } = require('../events/leveling'); // ✅ جلب دوال الواجهة
+// ✅ تم تصحيح المسارات لتتناسب مع وجود هذا الملف داخل مجلد events
+const { updateProgress } = require('./dailyTasks'); 
+const { checkStatBadges } = require('../utils/badges'); 
+const { addManualXP } = require('../utils/xpSystem'); 
+const { updateTierRole, announceLevelUp } = require('./leveling'); 
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const ANSWER_TIMEOUT = 20000;

@@ -1,5 +1,6 @@
 // ─── events/leveling.js ───────────────────────────────────────────────────────
 const { EmbedBuilder } = require('discord.js');
+// ✅ تصحيح مسارات استدعاء دوال utils
 const { getTier } = require('../utils/rankCard');
 const { addMessageXP } = require('../utils/xpSystem');
 const { checkLevelBadges } = require('../utils/badges');
