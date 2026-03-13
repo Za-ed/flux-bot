@@ -130,13 +130,19 @@ async function getLeaderboard(guildId, limit = 10) {
     if (!col) return [];
     return col.find({ guild_id: guildId }).sort({ total_xp: -1 }).limit(limit).toArray();
 }
+// دالة جلب بيانات المستخدم (هذه هي القطعة الناقصة)
+async function getUserData(guildId, userId) {
+    const col = await connect();
+    if (!col) return null;
+    return await col.findOne({ guild_id: guildId, user_id: userId });
+}
 
 module.exports = {
     init: connect,
-    getUserData,
     addMessageXP,
     addInviteXP,
     claimDaily,
     getLeaderboard,
-    xpForLevel
+    xpForLevel,
+    getUserData // تأكد أنها مضافة هنا
 };
