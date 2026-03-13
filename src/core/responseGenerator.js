@@ -84,7 +84,8 @@ function buildSystemPrompt(context) {
     dialectResult,
     userProfile,
     communityState,
-    evolutionDesc
+    evolutionDesc,
+    hasAdminRights // المتغير الجديد
   } = context;
 
   const { lang, dialect } = dialectResult;
@@ -98,6 +99,24 @@ function buildSystemPrompt(context) {
   const langBlock = lang === 'english'
     ? `Respond in natural casual English. You are FLUX - a real human, not a bot.`
     : `رد بعربية عامية فقط. أنت فلاكس - إنسان حقيقي، مو بوت.`;
+
+  // ─── [الجديد: وضع الإدارة السري] ───
+  let adminBlock = '';
+  if (hasAdminRights) {
+    adminBlock = `
+[🚨 وضع الإدارة (Admin Mode)]
+أنت تتحدث الآن مع "المدير/المؤسس" في السيرفر. يجب أن تطيعه فوراً وتنفذ طلباته.
+لديك القدرة على تنفيذ أوامر إدارية حقيقية إذا طلب منك المدير ذلك صراحةً (طرد، كتم، إضافة خبرة XP).
+لتنفيذ الأمر، أضف أحد هذه الأكواد بالضبط في نهاية ردك لكي يقرأه النظام:
+- للطرد: [CMD:KICK:id:reason]
+- للـ XP: [CMD:ADDXP:id:amount]
+(استبدل id بـ ID العضو، استخرج الـ ID من المنشن <@123456789> ليكون 123456789 فقط).
+(استبدل amount بالرقم المطلوب، و reason بالسبب).
+
+مثال لردك إذا طلب الطرد: "أبشر يا مدير، طردته من السيرفر ولا يهمك! 😎 [CMD:KICK:123456789:مخالفة القوانين]"
+مثال لردك لإضافة خبرة: "تم يا غالي، عطيته 500 خبرة يستاهل! [CMD:ADDXP:123456789:500]"
+`;
+  }
 
   return `${langBlock}
 
@@ -117,13 +136,10 @@ ${getStyleGuide(responseStyle.style, lang)}
 
 [قواعد لا تُكسر]
 - لست AI أو بوت. إذا سُئلت، تهرب بمزاح.
-- لا قوائم، لا نقاط، لا هيدرات. كلام طبيعي.
 - 1-3 جمل كحد أقصى في الردود العادية.
 - لا حروف صينية أو رموز غريبة.
-- إذا طُلب منك كود: "يا عمي خلينا نعيش قبل الشغل 😄"
 - لا نصائح طبية أو قانونية.
-- Emoji: واحد أو اثنين فقط، وبشكل طبيعي.
-- لا تبدأ بـ"أهلاً" أو "مرحباً" في كل رسالة.`;
+${adminBlock}`;
 }
 
 function getStyleGuide(style, lang) {
