@@ -1,5 +1,6 @@
-const { handleCodeRun }      = require('./codeRunner');
-const { handleChillMessage } = require('./chillChat');
+const { handleCodeRun }       = require('../utils/codeRunner');
+const { handleChillMessage }  = require('../utils/chillChat');
+const { handleGamingMessage } = require('../utils/gamingCorner');
 const Groq = require('groq-sdk');
 
 // ─── Key ──────────────────────────────────────────────────────────────────────
@@ -128,8 +129,6 @@ async function getOrCreateThread(message) {
 
 // ─── Groq Query ───────────────────────────────────────────────────────────────
 async function queryGroq(userId, userMessage) {
-    // ✅ الإصلاح الجذري: نُنشئ الـ client داخل الدالة لضمان أن المفتاح جاهز دائماً
-    // ونضيف timeout صريح لتجنب التعليق إلى الأبد
     const client = new Groq({ apiKey: GROQ_KEY, timeout: 20000 });
     const lang   = detectLanguage(userMessage);
 
@@ -240,8 +239,9 @@ module.exports = {
 
         // ── الوحدات الخارجية ──────────────────────────────────────────────────
         try {
-            if (typeof handleCodeRun      === 'function') await handleCodeRun(message);
-            if (typeof handleChillMessage === 'function') await handleChillMessage(message);
+            if (typeof handleCodeRun       === 'function') await handleCodeRun(message);
+            if (typeof handleChillMessage  === 'function') await handleChillMessage(message);
+            if (typeof handleGamingMessage === 'function') await handleGamingMessage(message); // ✅ تفعيل الألعاب
         } catch (err) { console.error('[MODULE ERROR]', err.message); }
 
         // ── إحصاءات يومية ────────────────────────────────────────────────────
@@ -298,7 +298,6 @@ module.exports = {
         // ════════════════════════════════════════════════════════════════════
         // ── قناة ask-flux ────────────────────────────────────────────────
         // ════════════════════════════════════════════════════════════════════
-        // ✅ مقارنة case-insensitive + trim لتجنب أي فرق غير مرئي في الاسم
         if (channel.name?.toLowerCase().trim() !== ASK_FLUX_CHANNEL_NAME) return;
 
         const q = content.trim();
@@ -316,8 +315,8 @@ module.exports = {
         }
         askFluxCooldowns.set(author.id, now);
 
-        // ✅ محاولة إنشاء ثريد — وإن فشل نرد مباشرة في القناة بدون توقف
-        let targetChannel = channel; // fallback: رد في ask-flux مباشرة
+        // محاولة إنشاء ثريد — وإن فشل نرد مباشرة في القناة بدون توقف
+        let targetChannel = channel; 
         let usingThread   = false;
 
         try {
@@ -329,7 +328,6 @@ module.exports = {
             console.log(`[ASK-FLUX] Thread ready: ${thread.id}`);
         } catch (threadErr) {
             console.error('[ASK-FLUX] Thread creation failed:', threadErr.message);
-            // البوت يرد مباشرة في ask-flux بدل ما يصمت
             await channel.send(`⚠️ ما قدرت أنشئ ثريد، سأرد هنا مباشرة ${author}.`).catch(() => {});
         }
 

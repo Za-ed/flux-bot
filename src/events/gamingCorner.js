@@ -1,10 +1,9 @@
 // ─── gamingCorner.js ──────────────────────────────────────────────────────────
-// كل ألعاب gaming-corner في ملف واحد
-// ✅ giveXP() يستخدم leveling.addXP() بدل الكتابة المباشرة
-
 const { EmbedBuilder } = require('discord.js');
 const { updateProgress } = require('./dailyTasks');
-const { checkStatBadges } = require('../utils/badges');
+const { checkStatBadges } = require('./badges');
+const { addManualXP } = require('./xpSystem'); // ✅ تم الاعتماد على MongoDB
+const { updateTierRole, announceLevelUp } = require('../events/leveling'); // ✅ جلب دوال الواجهة
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const ANSWER_TIMEOUT = 20000;
@@ -105,21 +104,14 @@ function clearGame(channelId) {
   activeGames.delete(channelId);
 }
 
-// ─── XP Helper ────────────────────────────────────────────────────────────────
-// ✅ يستخدم leveling.addXP() المركزية — لا كتابة مباشرة على الملف
+// ─── XP Helper (تم ربطه بـ MongoDB) ───────────────────────────────────────────
 async function giveXP(message, amount, gameType) {
   try {
-    const leveling = require('./leveling');
     const guildId  = message.guild.id;
     const userId   = message.author.id;
 
-    // ✅ نحفظ oldLevel قبل الاستدعاء لأن addXP تُعيد user object وليس { oldLevel, newLevel }
-    const beforeData = leveling.getUserLevel(guildId, userId);
-    const oldLevel   = beforeData?.level ?? 0;
-
-    // ✅ addXP في events/leveling متزامنة (sync) — لا تحتاج await
-    const updatedUser = leveling.addXP(guildId, userId, amount);
-    const newLevel    = updatedUser?.level ?? oldLevel;
+    // إضافة الـ XP الأساسي للعبة
+    const result = await addManualXP(guildId, userId, amount);
 
     // شارات الألعاب
     const newBadges = checkStatBadges(guildId, userId, 'games', 1);
@@ -128,15 +120,26 @@ async function giveXP(message, amount, gameType) {
       await message.channel.send(`🏅 ${message.author} كسب شارة: ${badgeText}`).catch(() => {});
     }
 
-    // مهام يومية
+    // مهام يومية (ألعاب)
     const dailyXp = updateProgress(guildId, userId, 'games');
-    if (gameType === 'trivia') updateProgress(guildId, userId, 'trivia');
-
-    if (newLevel > oldLevel) {
-      await message.channel.send(`🎉 ${message.author} وصل للمستوى **${newLevel}**!`).catch(() => {});
+    if (gameType === 'trivia') {
+        const triviaXp = updateProgress(guildId, userId, 'trivia');
+        if(triviaXp > 0) await addManualXP(guildId, userId, triviaXp); // إضافة الـ XP الفعلي لمهمة التريفيا
     }
 
+    // ترقية المستوى عبر الـ MongoDB Result
+    if (result && result.leveled) {
+        let member = message.guild.members.cache.get(userId);
+        if (!member) member = await message.guild.members.fetch(userId).catch(()=>null);
+        if(member) {
+            await updateTierRole(member, result.user.level);
+            await announceLevelUp(message.guild, member, result.user.level - 1, result.user.level);
+        }
+    }
+
+    // إضافة الـ XP الفعلي للمهام اليومية
     if (dailyXp > 0) {
+      await addManualXP(guildId, userId, dailyXp); 
       await message.channel.send(`📅 ${message.author} أكمل مهمة يومية! +${dailyXp} XP 🎊`).catch(() => {});
     }
   } catch (err) {
