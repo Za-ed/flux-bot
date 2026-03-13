@@ -39,7 +39,6 @@ const TICKET_TYPES = {
 };
 
 // ─── Store: بيانات التذاكر المفتوحة ──────────────────────────────────────────
-// channelId -> { ownerId, ownerTag, type, openedAt, closedBy, closedByTag, solved, stars, timeoutId }
 const ticketData = new Map();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -66,10 +65,6 @@ function getStaffRole(guild) {
     return guild.roles.cache.find((r) => r.name === STAFF_ROLE_NAME);
 }
 
-// ✅ استخراج channelId من customId بشكل آمن بغض النظر عن عدد الأجزاء
-// مثال: 'close_ticket_123'       → prefixParts=2 → '123'
-//        'rating_solved_yes_123'  → prefixParts=3 → '123'
-//        'rating_stars_3_123'     → prefixParts=3 → '123'
 function extractChannelId(customId, prefixParts) {
     return customId.split('_').slice(prefixParts).join('_');
 }
@@ -125,9 +120,8 @@ async function sendTicketLog(guild, data) {
 }
 
 // ─── إغلاق التذكرة النهائي (مركزي) ──────────────────────────────────────────
-// ✅ دالة واحدة تُستدعى من المؤقت التلقائي ومن زر النجوم — بدل تكرار المنطق
 async function finalizeTicket(guild, channelId, channel) {
-    if (!ticketData.has(channelId)) return; // تم الإغلاق مسبقاً، تجاهل
+    if (!ticketData.has(channelId)) return;
 
     const data = ticketData.get(channelId);
     if (data.timeoutId) clearTimeout(data.timeoutId);
@@ -160,7 +154,6 @@ module.exports = {
             const command = client.commands.get(interaction.commandName);
             if (!command) return;
 
-            // ✅ تغليف canUseCommand بـ try/catch — لو فشل permManager ما يسقط البوت
             let hasPermission = true;
             try {
                 hasPermission = canUseCommand(interaction.member, interaction.commandName);
@@ -169,14 +162,15 @@ module.exports = {
             }
 
             if (!hasPermission) {
-                return interaction.reply({ content: '❌ ما عندك صلاحية استخدام هذا الأمر.', ephemeral: true });
+                // ✅ تم استخدام flags: 64 بدلاً من ephemeral: true
+                return interaction.reply({ content: '❌ ما عندك صلاحية استخدام هذا الأمر.', flags: 64 });
             }
 
             try {
                 await command.execute(interaction);
             } catch (error) {
                 console.error(`[COMMANDS] Error in /${interaction.commandName}:`, error);
-                const msg = { content: '❌ حدث خطأ أثناء تنفيذ الأمر.', ephemeral: true };
+                const msg = { content: '❌ حدث خطأ أثناء تنفيذ الأمر.', flags: 64 };
                 if (interaction.replied || interaction.deferred) await interaction.followUp(msg).catch(() => {});
                 else await interaction.reply(msg).catch(() => {});
             }
@@ -185,7 +179,7 @@ module.exports = {
 
         // ── Dropdown — فتح تذكرة ──────────────────────────────────────────────
         if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: 64 }); // ✅ تم التعديل
 
             const value      = interaction.values[0];
             const ticketInfo = TICKET_TYPES[value];
@@ -194,7 +188,6 @@ module.exports = {
             const { guild, user } = interaction;
             const staffRole = getStaffRole(guild);
 
-            // ✅ فحص التذاكر المفتوحة عبر ticketData (أدق من البحث في cache)
             const hasOpenTicket = [...ticketData.values()].some((d) => d.ownerId === user.id);
             if (hasOpenTicket) {
                 const existingChannel = guild.channels.cache.find(
@@ -287,7 +280,6 @@ module.exports = {
         if (interaction.isButton()) {
             const { customId, guild, user, member } = interaction;
 
-            // ✅ تغليف handleSuggestVote بـ try/catch
             try {
                 if (await handleSuggestVote(interaction)) return;
             } catch (err) {
@@ -298,7 +290,7 @@ module.exports = {
             if (customId.startsWith('close_ticket_')) {
                 await interaction.deferReply();
 
-                const channelId      = extractChannelId(customId, 2); // close_ticket_ID
+                const channelId      = extractChannelId(customId, 2); 
                 const channelToClose = guild.channels.cache.get(channelId);
                 if (!channelToClose) return interaction.editReply({ content: '❌ القناة غير موجودة.' });
 
@@ -331,7 +323,6 @@ module.exports = {
                     components: buildRatingComponents(channelId),
                 });
 
-                // مؤقت 60 ثانية للإغلاق التلقائي لو ما قيّم
                 const timeoutId = setTimeout(async () => {
                     await finalizeTicket(guild, channelId, channelToClose);
                 }, TICKET_CLOSE_TIMEOUT);
@@ -345,13 +336,12 @@ module.exports = {
                 await interaction.deferUpdate();
 
                 const parts  = customId.split('_');
-                const answer = parts[2];                       // 'yes' أو 'no'
-                const chanId = parts.slice(3).join('_');       // channelId
+                const answer = parts[2];                       
+                const chanId = parts.slice(3).join('_');       
                 const data   = ticketData.get(chanId);
 
-                // ✅ فحص الصلاحية — فقط صاحب التذكرة أو الستاف
                 if (!canRate(user, member, data, guild)) {
-                    await interaction.followUp({ content: '❌ فقط صاحب التذكرة يقدر يقيّم.', ephemeral: true }).catch(() => {});
+                    await interaction.followUp({ content: '❌ فقط صاحب التذكرة يقدر يقيّم.', flags: 64 }).catch(() => {}); // ✅
                     return;
                 }
 
@@ -359,7 +349,7 @@ module.exports = {
 
                 await interaction.followUp({
                     content:   answer === 'yes' ? '✅ ممتاز! الحين اختر تقييمك من النجوم 👇' : '❌ نأسف لذلك. الحين اختر تقييمك من النجوم 👇',
-                    ephemeral: true,
+                    flags: 64, // ✅
                 }).catch(() => {});
                 return;
             }
@@ -373,9 +363,8 @@ module.exports = {
                 const chanId = parts.slice(3).join('_');
                 const data   = ticketData.get(chanId);
 
-                // ✅ فحص الصلاحية
                 if (!canRate(user, member, data, guild)) {
-                    await interaction.followUp({ content: '❌ فقط صاحب التذكرة يقدر يقيّم.', ephemeral: true }).catch(() => {});
+                    await interaction.followUp({ content: '❌ فقط صاحب التذكرة يقدر يقيّم.', flags: 64 }).catch(() => {}); // ✅
                     return;
                 }
 
@@ -383,10 +372,9 @@ module.exports = {
 
                 await interaction.followUp({
                     content:   `${'⭐'.repeat(stars)} شكراً على تقييمك! جاري إغلاق التذكرة الآن...`,
-                    ephemeral: true,
+                    flags: 64, // ✅
                 }).catch(() => {});
 
-                // إغلاق فوري بعد 2 ثانية ليلحق يقرأ الرسالة
                 if (data?.closedBy) {
                     setTimeout(async () => {
                         await finalizeTicket(guild, chanId, interaction.channel);

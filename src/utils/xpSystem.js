@@ -13,7 +13,12 @@ const cooldownCache = new Map();
 async function connect() {
     if (xpCollection) return xpCollection;
     try {
-        dbClient     = new MongoClient(MONGO_URI);
+        // إضافة خيارات الاتصال لمنع التعليق وإصلاح الـ SSL
+        dbClient = new MongoClient(MONGO_URI, {
+            serverSelectionTimeoutMS: 3000, // فشل سريع إذا لم يتصل خلال 3 ثوانٍ لمنع تعليق ديسكورد
+            tls: true
+        });
+        
         await dbClient.connect();
         const db  = dbClient.db(DB_NAME);
         xpCollection = db.collection(COL_NAME);
@@ -26,7 +31,7 @@ async function connect() {
         return xpCollection;
     } catch (err) {
         console.error('[XP] ❌ MongoDB Connection Error:', err.message);
-        return null;
+        throw err; // رمي الخطأ حتى لا يعتقد النظام أنه متصل
     }
 }
 
@@ -50,43 +55,46 @@ function xpForLevel(n) {
 
 // ─── دالة addXP الأساسية ───────────────────────────────────────────────────
 async function addXP(guildId, userId, amount, type = 'msg') {
-    const col = await connect();
-    if (!col) return null;
+    try {
+        const col = await connect();
+        if (!col) return null;
 
-    const fieldKey = type === 'msg' ? 'msg_count' : `${type}_xp`;
+        const fieldKey = type === 'msg' ? 'msg_count' : `${type}_xp`;
 
-    const result = await col.findOneAndUpdate(
-        { guild_id: guildId, user_id: userId },
-        {
-            $inc:         { xp: amount, total_xp: amount, [fieldKey]: 1 },
-            $setOnInsert: { created_at: Date.now(), level: 0, streak: 0, last_daily: 0 },
-        },
-        { upsert: true, returnDocument: 'after' }
-    );
-
-    // دعم الإصدارات القديمة والجديدة من MongoDB driver
-    let user = result?.value ?? result;
-    if (!user) return null;
-
-    // ─── حساب الترقية ─────────────────────────────────────────────────────
-    let leveled      = false;
-    let currentLevel = user.level || 0;
-
-    while (user.xp >= xpForLevel(currentLevel + 1)) {
-        user.xp -= xpForLevel(currentLevel + 1);
-        currentLevel++;
-        leveled = true;
-    }
-
-    if (leveled) {
-        await col.updateOne(
+        const result = await col.findOneAndUpdate(
             { guild_id: guildId, user_id: userId },
-            { $set: { level: currentLevel, xp: user.xp } }
+            {
+                $inc:         { xp: amount, total_xp: amount, [fieldKey]: 1 },
+                $setOnInsert: { created_at: Date.now(), level: 0, streak: 0, last_daily: 0 },
+            },
+            { upsert: true, returnDocument: 'after' }
         );
-        user.level = currentLevel;
-    }
 
-    return { gain: amount, leveled, user };
+        let user = result?.value ?? result;
+        if (!user) return null;
+
+        let leveled      = false;
+        let currentLevel = user.level || 0;
+
+        while (user.xp >= xpForLevel(currentLevel + 1)) {
+            user.xp -= xpForLevel(currentLevel + 1);
+            currentLevel++;
+            leveled = true;
+        }
+
+        if (leveled) {
+            await col.updateOne(
+                { guild_id: guildId, user_id: userId },
+                { $set: { level: currentLevel, xp: user.xp } }
+            );
+            user.level = currentLevel;
+        }
+
+        return { gain: amount, leveled, user };
+    } catch (err) {
+        console.error(`[XP] Failed to add XP: ${err.message}`);
+        return null;
+    }
 }
 
 // ─── XP الرسائل (مع cooldown) ─────────────────────────────────────────────
@@ -108,63 +116,78 @@ async function addInviteXP(guildId, userId) {
 
 // ─── XP اليومي (مع Streak) ─────────────────────────────────────────────────
 async function claimDaily(guildId, userId) {
-    const col  = await connect();
-    if (!col) return { success: false, remaining: 0 };
+    try {
+        const col  = await connect();
+        if (!col) return { success: false, remaining: 0 };
 
-    const user     = await col.findOne({ guild_id: guildId, user_id: userId }) || { last_daily: 0, streak: 0 };
-    const now      = Math.floor(Date.now() / 1000);
-    const oneDay   = 86400;
-    const timeSince = now - user.last_daily;
+        const user     = await col.findOne({ guild_id: guildId, user_id: userId }) || { last_daily: 0, streak: 0 };
+        const now      = Math.floor(Date.now() / 1000);
+        const oneDay   = 86400;
+        const timeSince = now - user.last_daily;
 
-    if (timeSince < oneDay) return { success: false, remaining: oneDay - timeSince };
+        if (timeSince < oneDay) return { success: false, remaining: oneDay - timeSince };
 
-    const newStreak = timeSince > oneDay * 2 ? 1 : (user.streak || 0) + 1;
-    const bonus     = Math.min(XP_CONFIG.STREAK_BONUS * (newStreak - 1), XP_CONFIG.STREAK_MAX);
-    const totalGain = XP_CONFIG.DAILY_BASE + bonus;
+        const newStreak = timeSince > oneDay * 2 ? 1 : (user.streak || 0) + 1;
+        const bonus     = Math.min(XP_CONFIG.STREAK_BONUS * (newStreak - 1), XP_CONFIG.STREAK_MAX);
+        const totalGain = XP_CONFIG.DAILY_BASE + bonus;
 
-    await col.updateOne(
-        { guild_id: guildId, user_id: userId },
-        {
-            $inc:         { xp: totalGain, total_xp: totalGain },
-            $set:         { last_daily: now, streak: newStreak },
-            $setOnInsert: { level: 0 },
-        },
-        { upsert: true }
-    );
+        await col.updateOne(
+            { guild_id: guildId, user_id: userId },
+            {
+                $inc:         { xp: totalGain, total_xp: totalGain },
+                $set:         { last_daily: now, streak: newStreak },
+                $setOnInsert: { level: 0 },
+            },
+            { upsert: true }
+        );
 
-    return { success: true, gain: totalGain, streak: newStreak };
+        return { success: true, gain: totalGain, streak: newStreak };
+    } catch (err) {
+        console.error(`[XP] Daily Claim Error: ${err.message}`);
+        return { success: false, remaining: 0 };
+    }
 }
 
 // ─── لوحة المتصدرين ────────────────────────────────────────────────────────
 async function getLeaderboard(guildId, limit = 10) {
-    const col = await connect();
-    if (!col) return [];
-    return col.find({ guild_id: guildId }).sort({ total_xp: -1 }).limit(limit).toArray();
+    try {
+        const col = await connect();
+        if (!col) return [];
+        return await col.find({ guild_id: guildId }).sort({ total_xp: -1 }).limit(limit).toArray();
+    } catch (err) {
+        return [];
+    }
 }
 
 // ─── بيانات مستخدم واحد ───────────────────────────────────────────────────
 async function getUserData(guildId, userId) {
-    const col = await connect();
-    if (!col) return null;
-    return col.findOne({ guild_id: guildId, user_id: userId });
+    try {
+        const col = await connect();
+        if (!col) return null;
+        return await col.findOne({ guild_id: guildId, user_id: userId });
+    } catch (err) {
+        return null;
+    }
 }
 
 // ─── ترتيب المستخدم (#1, #2 …) ────────────────────────────────────────────
 async function getUserRank(guildId, userId) {
-    const col = await connect();
-    if (!col) return null;
+    try {
+        const col = await connect();
+        if (!col) return null;
 
-    // نجلب بيانات المستخدم أولاً لمعرفة total_xp الخاصة به
-    const user = await col.findOne({ guild_id: guildId, user_id: userId });
-    if (!user) return null;
+        const user = await col.findOne({ guild_id: guildId, user_id: userId });
+        if (!user) return null;
 
-    // نعدّ كم شخصاً لديه total_xp أكبر منه (= ترتيبه - 1)
-    const rank = await col.countDocuments({
-        guild_id:  guildId,
-        total_xp:  { $gt: user.total_xp || 0 },
-    });
+        const rank = await col.countDocuments({
+            guild_id:  guildId,
+            total_xp:  { $gt: user.total_xp || 0 },
+        });
 
-    return rank + 1; // +1 لأن العدّ يبدأ من 0
+        return rank + 1;
+    } catch (err) {
+        return null;
+    }
 }
 
 // ─── XP الصوت (كل دقيقة) ──────────────────────────────────────────────────
@@ -219,8 +242,8 @@ module.exports = {
     init: connect,
     addMessageXP,
     addInviteXP,
-    addVoiceXP,      // ✅ كانت ناقصة — voiceXP.js يحتاجها
-    addReactionXP,   // ✅ كانت ناقصة — reactionXP.js يحتاجها
+    addVoiceXP,      
+    addReactionXP,   
     addManualXP,
     claimDaily,
     getLeaderboard,

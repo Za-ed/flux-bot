@@ -1,10 +1,11 @@
 // ─── events/ready.js ──────────────────────────────────────────────────────────
-const { ActivityType } = require('discord.js');
+const { ActivityType, Events } = require('discord.js');
 const { cacheInvites } = require('./guildMemberAdd');
-const { scheduleDailyReport } = require('../utils/dailyReport'); // ✅ كانت ناقصة
+const { scheduleDailyReport } = require('../utils/dailyReport'); 
 
 module.exports = {
-  name: 'ready',
+  // ✅ تم التغيير إلى clientReady لإزالة الـ Deprecation Warning
+  name: Events.ClientReady,
   once: true,
 
   async execute(client) {
@@ -18,7 +19,6 @@ module.exports = {
     console.log('[READY] Invite cache loaded');
 
     // ── جدول التقرير اليومي ───────────────────────────────────────────────
-    // ✅ كانت ناقصة — التقرير ما كان يُرسل أبداً بدون هذا السطر
     scheduleDailyReport(client);
 
     client.user.setPresence({
