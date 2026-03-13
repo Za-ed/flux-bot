@@ -194,15 +194,15 @@ async function generateRankCard({
     ctx.restore();
 
     // ── اسم المستخدم ──
-    const TX = 240;
+    const TX = 270; // زدنا الإزاحة لليمين قليلاً
     ctx.save();
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'middle';
-    ctx.font         = 'bold 32px Bricolage, Arial, sans-serif';
+    ctx.font         = 'bold 36px Bricolage, Arial, sans-serif';
     ctx.fillStyle    = '#ffffff';
     ctx.shadowColor  = `rgba(${gr},${gg},${gb},${0.5 * pulse})`;
     ctx.shadowBlur   = 10;
-    ctx.fillText(displayName || username || 'Unknown', TX, 80); // رفعنا الاسم قليلاً
+    ctx.fillText(displayName || username || 'Unknown', TX, 75); // رفعناه للأعلى أكثر
     ctx.restore();
 
     // ── badge الرتبة ──
@@ -214,7 +214,7 @@ async function generateRankCard({
     badgeGrad.addColorStop(0, `rgba(${gr},${gg},${gb},0.25)`);
     badgeGrad.addColorStop(1, `rgba(${gr},${gg},${gb},0.08)`);
     ctx.fillStyle = badgeGrad;
-    roundRect(ctx, TX, 105, labelW, 26, 13); // أنزلنا الرتبة قليلاً
+    roundRect(ctx, TX, 105, labelW, 26, 13);
     ctx.fill();
 
     ctx.strokeStyle = `rgba(${gr},${gg},${gb},0.4)`;
@@ -224,21 +224,21 @@ async function generateRankCard({
 
     ctx.fillStyle = tier.glow;
     ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
     ctx.fillText(tierLabel, TX + 14, 118);
 
     // ── PROGRESS label ──
     ctx.font      = '11px GeistMono, monospace';
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.fillText('PROGRESS', TX, 155);
+    ctx.fillText('PROGRESS', TX, 150);
 
     // XP Right aligned
     const currentDisplayXP = Math.floor(currentAnimatedPct * xpForNext);
     const xpText = `${currentDisplayXP.toLocaleString()} / ${xpForNext.toLocaleString()} XP  •  ${Math.round(currentAnimatedPct * 100)}%`;
     ctx.textAlign = 'right';
-    ctx.fillText(xpText, TX + 480, 155);
-    ctx.textAlign = 'left';
+    ctx.fillText(xpText, TX + 460, 150);
 
-    const BX = TX, BY = 165, BW = 480, BH = 12; // أنزلنا شريط التقدم ليكون متناسقاً
+    const BX = TX, BY = 165, BW = 460, BH = 12;
 
     ctx.fillStyle = 'rgba(255,255,255,0.07)';
     roundRect(ctx, BX, BY, BW, BH, 6);
@@ -304,7 +304,7 @@ async function generateRankCard({
       ctx.fillStyle   = tier.glow;
       ctx.shadowColor = tier.glow;
       ctx.shadowBlur  = 6 * pulse;
-      ctx.fillText(s.value, SX + cardW / 2, sy + 45); // توسيط القيمة بشكل أفضل
+      ctx.fillText(s.value, SX + cardW / 2, sy + 44); // توسيط القيمة بشكل أدق
       ctx.restore();
     });
 
