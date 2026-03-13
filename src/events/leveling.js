@@ -10,8 +10,7 @@ const XP_FILE = path.join(__dirname, '..', 'data', 'xp.json');
 const XP_PER_MSG  = { min: 15, max: 25 };
 const COOLDOWN_MS = 60 * 1000;
 
-// ─── رتب Discord التلقائية — اسمها يطابق رتب السيرفر ─────────────────────────
-// أنشئها في سيرفرك بنفس الأسماء
+// ─── رتب Discord التلقائية ────────────────────────────────────────────────────
 const TIER_ROLES = {
   'مبتدئ':   { minLevel: 0   },
   'مطور':    { minLevel: 10  },
@@ -41,25 +40,19 @@ function saveXP(data) {
 
 // ─── XP Helpers ───────────────────────────────────────────────────────────────
 function xpForLevel(n)  { return Math.floor(100 * Math.pow(n, 1.5)); }
-function totalXPForLevel(n) {
-  let total = 0;
-  for (let i = 1; i <= n; i++) total += xpForLevel(i);
-  return total;
-}
 
 function getUserData(db, guildId, userId) {
-  if (!db[guildId])           db[guildId] = {};
-  if (!db[guildId][userId])   db[guildId][userId] = { xp: 0, level: 0, lastMsg: 0 };
+  if (!db[guildId])         db[guildId] = {};
+  if (!db[guildId][userId]) db[guildId][userId] = { xp: 0, level: 0, lastMsg: 0 };
   return db[guildId][userId];
 }
 
 // ─── تحديث رتبة Discord ───────────────────────────────────────────────────────
 async function updateTierRole(member, newLevel) {
   try {
-    const guild        = member.guild;
-    const newTierName  = getTier(newLevel).name;
+    const guild       = member.guild;
+    const newTierName = getTier(newLevel).name;
 
-    // احذف كل رتب الـ tiers الحالية
     for (const roleName of TIER_ROLE_NAMES) {
       const role = guild.roles.cache.find((r) => r.name === roleName);
       if (role && member.roles.cache.has(role.id)) {
@@ -67,7 +60,6 @@ async function updateTierRole(member, newLevel) {
       }
     }
 
-    // أضف الرتبة الجديدة
     const newRole = guild.roles.cache.find((r) => r.name === newTierName);
     if (newRole) await member.roles.add(newRole).catch(() => {});
 
@@ -119,14 +111,13 @@ const cooldowns = new Map();
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 async function handleXP(message) {
-  if (message.author.bot)    return;
-  if (!message.guild)        return;
-  if (message.channel.isThread()) return;
+  if (message.author.bot)         return;
+  if (!message.guild)             return;
+  if (message.channel.isThread()) return; // ✅ تجاهل الثريدات — هذا كان يتعارض مع messageCreate.js
 
   const { author, guild } = message;
   const now = Date.now();
 
-  // Cooldown
   const lastTime = cooldowns.get(`${guild.id}:${author.id}`) || 0;
   if (now - lastTime < COOLDOWN_MS) return;
   cooldowns.set(`${guild.id}:${author.id}`, now);
@@ -134,12 +125,10 @@ async function handleXP(message) {
   const db   = loadXP();
   const user = getUserData(db, guild.id, author.id);
 
-  // XP عشوائي
   const xpGain = Math.floor(Math.random() * (XP_PER_MSG.max - XP_PER_MSG.min + 1)) + XP_PER_MSG.min;
-  user.xp      += xpGain;
-  user.lastMsg  = now;
+  user.xp     += xpGain;
+  user.lastMsg = now;
 
-  // فحص الترقية
   const oldLevel = user.level;
   while (user.xp >= xpForLevel(user.level + 1)) {
     user.xp    -= xpForLevel(user.level + 1);
@@ -148,7 +137,6 @@ async function handleXP(message) {
 
   saveXP(db);
 
-  // لو ترقى
   if (user.level > oldLevel) {
     const member = guild.members.cache.get(author.id);
     if (member) {
@@ -161,7 +149,7 @@ async function handleXP(message) {
 
 // ─── دوال مساعدة للأوامر ──────────────────────────────────────────────────────
 function getUserLevel(guildId, userId) {
-  const db   = loadXP();
+  const db = loadXP();
   return getUserData(db, guildId, userId);
 }
 
@@ -187,9 +175,13 @@ function addXP(guildId, userId, amount) {
 }
 
 module.exports = {
-  name: 'messageCreate',
-  once: false,
-  handleXP,
+  name:    'messageCreate',
+  once:    false,
+  execute: handleXP,        // ✅ هذه كانت ناقصة — السبب الجذري لعدم عمل AI
+  // ✅ هذه كانت ناقصة — reactionXP.js و voiceXP.js يحتاجونها
+  updateTierRole,
+  announceLevelUp,
+  // دوال الأوامر
   getUserLevel,
   getLeaderboard,
   addXP,

@@ -113,7 +113,13 @@ async function giveXP(message, amount, gameType) {
     const guildId  = message.guild.id;
     const userId   = message.author.id;
 
-    const { oldLevel, newLevel } = leveling.addXP(guildId, userId, amount);
+    // ✅ نحفظ oldLevel قبل الاستدعاء لأن addXP تُعيد user object وليس { oldLevel, newLevel }
+    const beforeData = leveling.getUserLevel(guildId, userId);
+    const oldLevel   = beforeData?.level ?? 0;
+
+    // ✅ addXP في events/leveling متزامنة (sync) — لا تحتاج await
+    const updatedUser = leveling.addXP(guildId, userId, amount);
+    const newLevel    = updatedUser?.level ?? oldLevel;
 
     // شارات الألعاب
     const newBadges = checkStatBadges(guildId, userId, 'games', 1);

@@ -167,6 +167,16 @@ async function getUserRank(guildId, userId) {
     return rank + 1; // +1 لأن العدّ يبدأ من 0
 }
 
+// ─── XP الصوت (كل دقيقة) ──────────────────────────────────────────────────
+async function addVoiceXP(guildId, userId) {
+    return addXP(guildId, userId, XP_CONFIG.VOICE_PER_MIN, 'voice');
+}
+
+// ─── XP التفاعلات ──────────────────────────────────────────────────────────
+async function addReactionXP(guildId, userId) {
+    return addXP(guildId, userId, XP_CONFIG.REACTION_XP, 'reaction');
+}
+
 // ─── إضافة XP يدوياً من الإدارة ───────────────────────────────────────────
 async function addManualXP(guildId, userId, amount) {
     const col = await connect();
@@ -209,10 +219,12 @@ module.exports = {
     init: connect,
     addMessageXP,
     addInviteXP,
+    addVoiceXP,      // ✅ كانت ناقصة — voiceXP.js يحتاجها
+    addReactionXP,   // ✅ كانت ناقصة — reactionXP.js يحتاجها
     addManualXP,
     claimDaily,
     getLeaderboard,
     getUserData,
-    getUserRank,   // ✅ كانت ناقصة — أُضيفت الآن
+    getUserRank,
     xpForLevel,
 };

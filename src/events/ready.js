@@ -1,6 +1,7 @@
 // ─── events/ready.js ──────────────────────────────────────────────────────────
 const { ActivityType } = require('discord.js');
 const { cacheInvites } = require('./guildMemberAdd');
+const { scheduleDailyReport } = require('../utils/dailyReport'); // ✅ كانت ناقصة
 
 module.exports = {
   name: 'ready',
@@ -15,6 +16,10 @@ module.exports = {
       await cacheInvites(guild).catch(() => {});
     }
     console.log('[READY] Invite cache loaded');
+
+    // ── جدول التقرير اليومي ───────────────────────────────────────────────
+    // ✅ كانت ناقصة — التقرير ما كان يُرسل أبداً بدون هذا السطر
+    scheduleDailyReport(client);
 
     client.user.setPresence({
       activities: [{ name: '/ask-flux | FLUX • IO', type: ActivityType.Watching }],

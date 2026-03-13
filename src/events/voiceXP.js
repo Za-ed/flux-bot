@@ -1,6 +1,7 @@
 // ─── events/voiceXP.js ────────────────────────────────────────────────────────
 const { addVoiceXP }                      = require('../utils/xpSystem');
 const { updateTierRole, announceLevelUp } = require('./leveling');
+const { updateProgress }                  = require('./dailyTasks'); // ✅ نقلناها للأعلى بدل داخل الـ callback
 
 const inVoice     = new Map(); // key → joinTimestamp
 const voiceTimers = new Map(); // key → intervalId
@@ -59,7 +60,6 @@ module.exports = {
 
       // تحديث مهام يومية
       try {
-        const { updateProgress } = require('./dailyTasks');
         const minutes = joinTime ? Math.floor((Date.now() - joinTime) / 60000) : 0;
         if (minutes > 0) updateProgress(guildId, userId, 'voice', minutes);
       } catch {}
