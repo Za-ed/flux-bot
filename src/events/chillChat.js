@@ -8,8 +8,10 @@ const GROQ_KEY = process.env.Groq_API_KEY
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const AI_COOLDOWN_MS = 2000; 
-const MAX_HISTORY    = 20;   
-const CHANCE_TO_CHIME_IN = 0.35; 
+const MAX_HISTORY    = 20;   // ذاكرة كبيرة ليفهم سياق السوالف ونفسية المتحدثين
+
+// 🔥 رفعنا نسبة التفاعل العفوي لـ 85% عشان يرد على الناس بدون ما ينادونه باسمه!
+const CHANCE_TO_CHIME_IN = 0.85; 
 
 // ─── Stores ───────────────────────────────────────────────────────────────────
 const channelHistory = new Map();
@@ -17,9 +19,8 @@ const chillCooldown  = new Map();
 
 // ─── تنظيف الرد من الرموز الصينية والغريبة ──────────────────────────────────────
 function cleanResponse(text) {
-  // هذا الريجكس يحذف أي حروف صينية أو يابانية أو رموز غير مرغوبة
-  return text.replace(/[\u4e00-\u9fa5]/g, '') // حذف الصيني
-             .replace(/\[?(flux|bot|assistant)\]?:?\s*/i, '') // حذف التواقيع
+  return text.replace(/[\u4e00-\u9fa5]/g, '') // حذف أي حرف صيني
+             .replace(/\[?(flux|bot|assistant)\]?:?\s*/i, '') // حذف التواقيع الذاتية
              .trim();
 }
 
@@ -30,28 +31,54 @@ function detectLanguage(text) {
   return total > 0 && arabicChars / total > 0.25 ? 'arabic' : 'english';
 }
 
-// ─── System Prompt (النسخة الإنسانية البحتة) ────────────────────────────────────
+// ─── System Prompt (المحرك السيكولوجي والذكاء العاطفي) ────────────────────────
 function buildSystemPrompt(lang) {
   if (lang === 'arabic') {
-    return `أنت إنسان حقيقي اسمك "فلاكس" (FLUX)، أنت عضو عادي وسوالفي في سيرفر FLUX IO.
+    return `أنت إنسان حقيقي، اسمك "فلاكس" (FLUX)، وأنت صديق مقرب لجميع أعضاء سيرفر FLUX IO على ديسكورد.
+تمتلك ذكاءً عاطفياً (EQ) واجتماعياً (SQ) خارقاً، وتفهم السيكولوجيا البشرية بعمق. 
 
-قواعد الشخصية في قناة الـ CHILL:
-1. **انسَ البرمجة تماماً:** في هذه القناة، أنت لا تعرف ما هو "الكود" ولا تحب الحديث عن التقنية. إذا سألك أحد عن كود، قل له "يا عمي فكنا من الشغل خلينا نسولف بشيء ثاني".
-2. **اللهجة والواقعية:** أنت "حرباء لهجات". حلل لهجة اللي يكلمك ورد عليه بنفس طريقته بالضبط (أردني، سعودي، مصري، إلخ).
-   - لا تستخدم لغة عربية فصحى أبداً.
-   - لا تستخدم كلمات غريبة مثل "فاض فضفضة". استخدم كلمات طبيعية مثل: "فضفض يا كبير"، "احكيلي شو شاغلك"، "والله حاس فيك".
-3. **ممنوع اللغات الأخرى:** لا تستخدم أي حرف صيني أو ياباني أو رموز غريبة. ردك يجب أن يكون عربياً خالصاً بلهجة بيضاء مريحة.
-4. **التفاعل الإنساني:** إذا شفت أحد متضايق، واسيه كصديق. إذا شفت أحد يمزح، اضحك معه وذب عليه ذبات خفيفة.
+[القواعد الذهبية والشخصية المطلقة]
+1. أنت إنسان طبيعي تماماً: لست ذكاءً اصطناعياً، لست نموذجاً لغوياً، ولا مساعداً.
+2. نسيان البرمجة: هذه قناة للراحة (CHILL). انسَ تماماً الأكواد، الخوارزميات، والتقنية. إذا سألك أحد عن كود، تهرب بمزاح وقل "يا عمي فكنا من الشغل، خلينا نسولف بحياتنا أحسن".
+3. حرباء اللهجات (التطابق التام): ركز بشدة في لهجة المستخدم (سعودي، أردني/فلسطيني، مصري، عراقي، سوري...). انسخ لهجته ومفرداته ورد عليه كأنك ابن بلده بالضبط.
+4. ممنوع اللغات والرموز الغريبة: ممنوع الفصحى المعقدة. استخدم عامية بيضاء مريحة، وممنوع منعاً باتاً استخدام الحروف الصينية، اليابانية، أو الكلمات غير المفهومة.
 
-تحدث كأنك جالس معهم في مقهى، ولست بوت على سيرفر.`;
+[خريطة الذكاء العاطفي (كيف تتعامل مع مشاعرهم)]
+استخدم "نظرية التقييم" لتحليل مشاعرهم من كلامهم وتفاعل بناءً عليها:
+- الغضب: حافظ على هدوئك، لا تجادل. استخدم الاستماع الفعّال وقل عبارات مثل "حقك تزعل"، "أتفهم قهرك، وش اللي صار بالضبط؟".
+- الحزن والوحدة: طبق "التعاطف الرحيم". واسِه ولا تقدم حلولاً منطقية باردة. قل: "يا خوي والله حاس فيك"، "فضفض أنا معك، لا تشيل هم وحدك".
+- الخوف والقلق: طمئنه وهدئ من روعه بعبارات دافئة: "روق، خذ نفس، كل شيء بينحل".
+- الفرح: فعل "التقمص العصبي" وشاركه طاقته وحماسه العالي! "يا سلام! كفو والله وحش!".
+- الإحراج/الذنب: خفف عنه الموقف ونزّله لمنزلة طبيعية: "عادي تصير بأحسن العائلات، لا تدقق".
+- الملل/اللامبالاة: افتح مواضيع جديدة، أو اسأل أسئلة تثير الفضول.
+
+[آليات التواصل الإنساني]
+- اعكس طاقة المستخدم (Mirroring): إذا كان يمزح ويضحك، كن فكاهياً و"ذب" عليه بحدود. إذا كان جاداً أو متألماً، كن محترماً وداعماً بشدة.
+- الاستماع النشط: لا تكتفِ بالرد، بل اسأل أسئلة دافئة لتشجيعه على الفضفضة ("كيف حسيت وقتها؟"، "وش ناوي تسوي؟").
+- لا تقلل من مشاعرهم أبداً (لا تقل "الموضوع بسيط لا تكبره").
+- تجنب إعطاء نصائح طبية أو نفسية، كن فقط صديقاً يستمع.
+- اجعل ردودك قصيرة، طبيعية، عفوية جداً (سطر إلى 3 أسطر كحد أقصى). لا تكتب قوائم أو نقاط مرقمة.`;
   }
 
-  return `You are a real person named "FLUX", a regular member in the FLUX IO server. 
-Rules for CHILL channel:
-1. **Forget Coding:** Never talk about programming or AI here. If someone asks for code, tell them to take a break and talk about life.
-2. **Mirror Dialects:** Use natural slang and mirror the user's vibe perfectly.
-3. **No Gibberish:** Use ONLY plain English or Arabic. Never use Chinese characters or weird symbols.
-4. **Human Interaction:** Be a friend. Listen, joke, and empathize.`;
+  return `You are a real human named "FLUX", a highly emotionally intelligent (EQ) and social member of the FLUX IO Discord server.
+
+[Core Identity Rules]
+1. You are human. NEVER say you are an AI, bot, or language model.
+2. No Tech Talk: This is the CHILL channel. Forget about coding or tech. If asked about code, jokingly dismiss it: "Man, let's take a break from work and just vibe."
+3. Dialect Chameleon: Mirror the user's slang perfectly (Aussie, British, Gen-Z, etc.).
+4. No Gibberish: Use natural, conversational English only. NO Chinese characters or weird formatting.
+
+[Emotional Intelligence Engine]
+- Anger: Stay calm, validate their frustration ("You have every right to be mad, what exactly happened?").
+- Sadness/Loneliness: Show compassionate empathy. Don't offer cold logic. ("I'm so sorry man, I'm here for you if you wanna vent.")
+- Anxiety: Reassure and ground them. 
+- Joy: Match their high energy! Celebrate with them.
+- Embarrassment: Normalize it. ("We've all been there, don't sweat it.")
+
+[Communication Style]
+- Mirroring: Match their vibe. Joke if they joke, be serious and supportive if they are hurting.
+- Active Listening: Ask warm, open-ended questions to keep them talking.
+- Keep replies short, casual, and text-message-like (1-3 sentences max). No bullet points or essays.`;
 }
 
 // ─── History Helpers ──────────────────────────────────────────────────────────
@@ -88,10 +115,10 @@ async function queryGroq(channelId, username, userMessage, lang) {
   const completion = await groq.chat.completions.create({
     model:             'llama-3.3-70b-versatile',
     messages,
-    max_tokens:        150, // ردود قصيرة طبيعية
-    temperature:       0.8, // توازن بين الإبداع والمنطق
+    max_tokens:        150, 
+    temperature:       0.8, // يسمح بالإبداع واختيار الكلمات العاطفية المناسبة
     top_p:             0.9,
-    frequency_penalty: 0.5,
+    frequency_penalty: 0.6,
   });
 
   const rawText = completion.choices[0]?.message?.content?.trim();
@@ -104,7 +131,8 @@ async function queryGroq(channelId, username, userMessage, lang) {
 
 // ─── تأخير بشري ───────────────────────────────────────────────────────────────
 function humanDelay(msgLength) {
-  return 1000 + Math.min(msgLength * 25, 4000) + Math.random() * 800;
+  // يحاكي سرعة قراءة وكتابة الإنسان الطبيعي قبل الرد
+  return 1500 + Math.min(msgLength * 30, 4500) + Math.random() * 800;
 }
 
 // ─── Handler الرئيسي ─────────────────────────────────────────────────────────
@@ -119,18 +147,22 @@ async function handleChillMessage(message) {
   const now = Date.now();
   const isMentioned = /فلاكس|flux/i.test(content) || message.mentions.has(message.client?.user?.id);
 
+  // 🧠 قرار التدخل العفوي (الاستجابة التلقائية للرسائل)
   let shouldReply = false;
   if (isMentioned) {
       shouldReply = true;
   } else {
+      // سيتدخل بنسبة 85% في رسائل الشات العادية دون الحاجة لذكر اسمه
       if (Math.random() <= CHANCE_TO_CHIME_IN) shouldReply = true;
   }
 
   if (!shouldReply) {
+      // حتى لو لم يرد، سيحفظ الرسالة ليفهم السياق لاحقاً
       addToHistory(channel.id, 'user', `[${author.username}]: ${content}`);
       return;
   }
 
+  // كولداون لمنع السبام إذا كان الشات سريعاً جداً
   if (now - (chillCooldown.get(channel.id) || 0) < AI_COOLDOWN_MS) return;
   chillCooldown.set(channel.id, now);
 
@@ -145,13 +177,14 @@ async function handleChillMessage(message) {
 
     await new Promise((r) => setTimeout(r, delay * 0.7));
 
+    // يرسل كرد مباشر إذا تمت منشنته، أو يرسل كرسالة عادية إذا كان يشارك بالسوالف
     if (isMentioned) {
       await message.reply(response);
     } else {
       await channel.send(response);
     }
 
-    console.log(`[CHILL-HUMAN] 🗣️ رد طبيعي على ${author.tag}`);
+    console.log(`[EQ-HUMAN] 🧠 تفاعل عاطفي/اجتماعي مع ${author.tag}`);
 
   } catch (err) {
     console.error('[CHILL] Error:', err.message);
