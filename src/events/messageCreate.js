@@ -19,27 +19,20 @@ const THREAD_INACTIVITY_MS  = 2 * 60 * 1000;
 const CACHE_CLEANUP_MS      = 10 * 60 * 1000;
 const MAX_HISTORY_LENGTH    = 10;
 
-// ─── Groq Client (Singleton) ──────────────────────────────────────────────────
-// ✅ إنشاء client مرة واحدة بدل إعادة إنشائه في كل طلب (أسرع وأوفر بالموارد)
-const groqClient = new Groq({ apiKey: GROQ_KEY });
-
 // ─── Stores ───────────────────────────────────────────────────────────────────
 const spamMap             = new Map();
 const conversationHistory = new Map();
-const userCooldowns       = new Map();
-const userThreads         = new Map();
-const threadTimers        = new Map();
+const askFluxCooldowns    = new Map();
+const threadCooldowns     = new Map();
+const userThreads         = new Map(); // userId -> threadId
+const threadTimers        = new Map(); // threadId -> timeoutId
 
-// ✅ تنظيف دوري لمنع تسرب الذاكرة مع كثرة المستخدمين
+// ─── تنظيف دوري لمنع تسرب الذاكرة ───────────────────────────────────────────
 setInterval(() => {
     const now = Date.now();
-    for (const [key, ts] of userCooldowns.entries()) {
-        if (now - ts > CACHE_CLEANUP_MS) userCooldowns.delete(key);
-    }
-    for (const [key, data] of spamMap.entries()) {
-        const lastTs = data.timestamps.at(-1) ?? 0;
-        if (now - lastTs > SPAM_WINDOW_MS * 10) spamMap.delete(key);
-    }
+    for (const [k, ts]   of askFluxCooldowns.entries()) if (now - ts   > CACHE_CLEANUP_MS)    askFluxCooldowns.delete(k);
+    for (const [k, ts]   of threadCooldowns.entries())  if (now - ts   > CACHE_CLEANUP_MS)    threadCooldowns.delete(k);
+    for (const [k, data] of spamMap.entries())          if ((now - (data.timestamps.at(-1) ?? 0)) > SPAM_WINDOW_MS * 10) spamMap.delete(k);
 }, CACHE_CLEANUP_MS);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -72,7 +65,6 @@ async function sendTempWarning(channel, content, deleteAfterMs = 5000) {
     } catch {}
 }
 
-// ✅ تحسين: كشف اللغة بنسبة الأحرف العربية بدل مجرد وجودها
 function detectLanguage(text) {
     const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
     return arabicChars / text.length > 0.3 ? 'arabic' : 'english';
@@ -81,19 +73,18 @@ function detectLanguage(text) {
 // ─── Thread Timer ─────────────────────────────────────────────────────────────
 function resetThreadTimer(thread, userId) {
     if (threadTimers.has(thread.id)) clearTimeout(threadTimers.get(thread.id));
-
     const timer = setTimeout(async () => {
         try {
-            await thread.send('⏰ تم إغلاق هذا الثريد تلقائياً بسبب عدم النشاط لمدة دقيقتين.');
+            await thread.send('⏰ تم إغلاق هذا الثريد تلقائياً بسبب عدم النشاط.');
             await new Promise((r) => setTimeout(r, 2000));
             await thread.delete('Inactivity timeout').catch(() => {});
         } catch {}
         userThreads.delete(userId);
         threadTimers.delete(thread.id);
         conversationHistory.delete(userId);
-        console.log(`[THREAD] Auto-deleted thread for user ${userId}`);
+        threadCooldowns.delete(userId);
+        console.log(`[THREAD] Auto-deleted for user ${userId}`);
     }, THREAD_INACTIVITY_MS);
-
     threadTimers.set(thread.id, timer);
 }
 
@@ -102,10 +93,18 @@ async function getOrCreateThread(message) {
     const { author, guild } = message;
 
     if (userThreads.has(author.id)) {
-        const existing = guild.channels.cache.get(userThreads.get(author.id));
-        if (existing && !existing.archived && !existing.deleted) return existing;
+        const threadId = userThreads.get(author.id);
+        let existing   = guild.channels.cache.get(threadId);
+        if (!existing) {
+            try { existing = await guild.channels.fetch(threadId); } catch { existing = null; }
+        }
+        if (existing && !existing.archived) return existing;
+
+        // الثريد محذوف أو مؤرشف — نظّف
         userThreads.delete(author.id);
         conversationHistory.delete(author.id);
+        threadCooldowns.delete(author.id);
+        if (threadId) threadTimers.delete(threadId);
     }
 
     const thread = await message.startThread({
@@ -117,12 +116,11 @@ async function getOrCreateThread(message) {
     userThreads.set(author.id, thread.id);
 
     await thread.send(
-        `👋 **أهلاً ${author}!**\n` +
-        `هذا ثريدك الخاص مع **FLUX AI**.\n\n` +
-        `> 💡 اسألني أي شيء — برمجة، معرفة عامة، أو محادثة عادية.\n` +
-        `> 🧹 اكتب \`!مسح\` أو \`!clear\` لمسح تاريخ المحادثة.\n` +
-        `> 📊 اكتب \`!تاريخ\` لرؤية عدد الرسائل في محادثتك الحالية.\n` +
-        `> ⏰ سيتم حذف الثريد تلقائياً بعد **دقيقتين** من عدم النشاط.`
+        `👋 **أهلاً ${author}!** هذا ثريدك الخاص مع **FLUX AI**.\n\n` +
+        `> 💡 اسألني أي شيء — برمجة، معرفة عامة، محادثة عادية.\n` +
+        `> 🧹 \`!مسح\` لمسح تاريخ المحادثة.\n` +
+        `> 📊 \`!تاريخ\` لعرض عدد الرسائل الحالية.\n` +
+        `> ⏰ يُحذف الثريد تلقائياً بعد دقيقتين من عدم النشاط.`
     );
 
     return thread;
@@ -130,22 +128,25 @@ async function getOrCreateThread(message) {
 
 // ─── Groq Query ───────────────────────────────────────────────────────────────
 async function queryGroq(userId, userMessage) {
-    const lang = detectLanguage(userMessage);
+    // ✅ الإصلاح الجذري: نُنشئ الـ client داخل الدالة لضمان أن المفتاح جاهز دائماً
+    // ونضيف timeout صريح لتجنب التعليق إلى الأبد
+    const client = new Groq({ apiKey: GROQ_KEY, timeout: 20000 });
+    const lang   = detectLanguage(userMessage);
 
     const systemPrompt = lang === 'arabic'
         ? `أنت FLUX Bot، مساعد ذكي واحترافي في سيرفر FLUX IO على Discord.
-قواعد صارمة:
-- رد دائماً بالعربية الفصحى السهلة
-- المصطلحات التقنية اكتبها بالإنجليزي داخل backticks
-- استخدم markdown code blocks مع اسم اللغة عند الكود
+قواعد:
+- رد بالعربية الفصحى السهلة دائماً
+- المصطلحات التقنية بالإنجليزي داخل backticks
+- استخدم code blocks مع اسم اللغة
 - لا تكرر السؤال في ردك
-- أسلوبك: واضح، مفيد، ودود، ومختصر`
-        : `You are FLUX Bot, a smart and professional assistant in the FLUX IO Discord server.
+- كن واضحاً، مفيداً، ودوداً، ومختصراً`
+        : `You are FLUX Bot, a smart assistant in FLUX IO Discord server.
 Rules:
-- Always respond in English only
-- Use markdown code blocks with language names for code
-- Don't repeat the question in your response
-- Be clear, helpful, concise, and friendly`;
+- Respond in English only
+- Use markdown code blocks with language names
+- Don't repeat the question
+- Be clear, helpful, concise, friendly`;
 
     if (!conversationHistory.has(userId)) conversationHistory.set(userId, []);
     const history = conversationHistory.get(userId);
@@ -153,7 +154,7 @@ Rules:
     history.push({ role: 'user', content: userMessage });
     if (history.length > MAX_HISTORY_LENGTH) history.splice(0, history.length - MAX_HISTORY_LENGTH);
 
-    const completion = await groqClient.chat.completions.create({
+    const completion = await client.chat.completions.create({
         model:       'llama-3.3-70b-versatile',
         messages:    [{ role: 'system', content: systemPrompt }, ...history],
         max_tokens:  1500,
@@ -167,80 +168,60 @@ Rules:
     return text;
 }
 
-// ─── AI Response Handler (موحّد) ──────────────────────────────────────────────
+// ─── AI Response Handler ──────────────────────────────────────────────────────
 async function handleAIResponse(userId, question, targetChannel, originalMessage = null) {
     let typingInterval = null;
-
     try {
         await targetChannel.sendTyping().catch(() => {});
         typingInterval = setInterval(() => targetChannel.sendTyping().catch(() => {}), 5000);
-
         if (originalMessage) await originalMessage.react('⏳').catch(() => {});
 
         const aiResponse = await queryGroq(userId, question);
 
-        clearInterval(typingInterval);
-        typingInterval = null;
-
+        clearInterval(typingInterval); typingInterval = null;
         if (originalMessage) {
             await originalMessage.reactions.cache.get('⏳')?.remove().catch(() => {});
             await originalMessage.react('✅').catch(() => {});
         }
-
-        const chunks = splitMessage(aiResponse, 1900);
-        for (const chunk of chunks) await targetChannel.send(chunk);
+        for (const chunk of splitMessage(aiResponse, 1900)) await targetChannel.send(chunk);
 
     } catch (err) {
         if (typingInterval) { clearInterval(typingInterval); typingInterval = null; }
-
         if (originalMessage) {
             await originalMessage.reactions.cache.get('⏳')?.remove().catch(() => {});
             await originalMessage.react('❌').catch(() => {});
         }
-
-        // ✅ تمييز أنواع الأخطاء برسائل مناسبة
-        let errMsg = '❌ عذراً، حدث خطأ. حاول مجدداً بعد قليل.';
-        if (err?.status === 429 || err?.message?.includes('rate'))    errMsg = '⏳ الخادم مشغول حالياً، انتظر ثوانٍ وحاول مجدداً.';
+        let errMsg = '❌ عذراً، حدث خطأ. حاول مجدداً.';
+        if (err?.status === 429 || err?.message?.includes('rate'))          errMsg = '⏳ الخادم مشغول، انتظر ثوانٍ وحاول مجدداً.';
         if (err?.message?.includes('timeout') || err?.code === 'ETIMEDOUT') errMsg = '⌛ انتهت مهلة الاتصال. حاول مجدداً.';
-
+        if (err?.status === 401)                                             errMsg = '🔑 خطأ في مفتاح Groq API. تواصل مع المسؤول.';
         await targetChannel.send(errMsg).catch(() => {});
-        console.error('[GROQ ERROR]', err.message);
+        console.error('[GROQ ERROR]', err?.status, err?.message);
     }
 }
 
-// ─── Anti-Spam Handler ────────────────────────────────────────────────────────
+// ─── Anti-Spam ────────────────────────────────────────────────────────────────
 async function handleAntiSpam(message) {
     const { author, member, channel } = message;
     const now = Date.now();
-
     if (!spamMap.has(author.id)) spamMap.set(author.id, { timestamps: [], messageIds: [] });
-
     const spamData = spamMap.get(author.id);
     spamData.timestamps.push(now);
     spamData.messageIds.push(message.id);
-
     while (spamData.timestamps.length > 0 && now - spamData.timestamps[0] > SPAM_WINDOW_MS) {
         spamData.timestamps.shift();
         spamData.messageIds.shift();
     }
-
     if (spamData.timestamps.length >= SPAM_THRESHOLD) {
         const idsToDelete = [...spamData.messageIds];
         spamMap.delete(author.id);
-
-        // ✅ حذف الرسائل بالتوازي بدل الواحدة تلو الأخرى (أسرع)
         await Promise.allSettled(
-            idsToDelete.map((id) =>
-                channel.messages.fetch(id).then((m) => m.delete()).catch(() => {})
-            )
+            idsToDelete.map((id) => channel.messages.fetch(id).then((m) => m.delete()).catch(() => {}))
         );
-
         try {
             await member.timeout(TIMEOUT_DURATION_MS, 'Auto spam detection');
             await sendTempWarning(channel, `🔇 **${author.username}** تم كتمه 5 دقائق بسبب السبام.`, 8000);
-        } catch (err) {
-            console.error('[AUTOMOD] Timeout failed:', err.message);
-        }
+        } catch (err) { console.error('[AUTOMOD] Timeout failed:', err.message); }
         return true;
     }
     return false;
@@ -261,9 +242,7 @@ module.exports = {
         try {
             if (typeof handleCodeRun      === 'function') await handleCodeRun(message);
             if (typeof handleChillMessage === 'function') await handleChillMessage(message);
-        } catch (err) {
-            console.error('[MODULE ERROR]', err.message);
-        }
+        } catch (err) { console.error('[MODULE ERROR]', err.message); }
 
         // ── إحصاءات يومية ────────────────────────────────────────────────────
         try {
@@ -279,71 +258,81 @@ module.exports = {
         }
 
         // ── Anti-Spam ─────────────────────────────────────────────────────────
-        if (!isStaff(member)) {
-            const isSpam = await handleAntiSpam(message);
-            if (isSpam) return;
-        }
+        if (!isStaff(member) && await handleAntiSpam(message)) return;
 
-        // ── ردود داخل ثريد AI ─────────────────────────────────────────────────
+        // ════════════════════════════════════════════════════════════════════
+        // ── ثريد AI (رسائل داخل الثريد الخاص بالمستخدم) ──────────────────
+        // ════════════════════════════════════════════════════════════════════
         if (channel.isThread()) {
             if (userThreads.get(author.id) !== channel.id) return;
 
-            const userQuestion = content.trim();
-            if (!userQuestion) return;
+            const q = content.trim();
+            if (!q) return;
 
-            // أوامر الثريد
-            if (userQuestion === '!clear' || userQuestion === '!مسح') {
+            if (q === '!clear' || q === '!مسح') {
                 conversationHistory.delete(author.id);
                 await channel.send('🧹 تم مسح تاريخ محادثتك. نبدأ من جديد!');
                 resetThreadTimer(channel, author.id);
                 return;
             }
-
-            // ✅ أمر جديد: عرض حجم التاريخ الحالي
-            if (userQuestion === '!تاريخ' || userQuestion === '!history') {
+            if (q === '!تاريخ' || q === '!history') {
                 const count = conversationHistory.get(author.id)?.length ?? 0;
-                await channel.send(`📊 عدد الرسائل في محادثتك الحالية: **${count}** / ${MAX_HISTORY_LENGTH}`);
+                await channel.send(`📊 **${count}** / ${MAX_HISTORY_LENGTH} رسائل في المحادثة الحالية.`);
                 resetThreadTimer(channel, author.id);
                 return;
             }
 
-            const lastUsed = userCooldowns.get(author.id) || 0;
+            const lastUsed = threadCooldowns.get(author.id) || 0;
             const now      = Date.now();
             if (now - lastUsed < AI_COOLDOWN_MS) {
-                const remaining = ((AI_COOLDOWN_MS - (now - lastUsed)) / 1000).toFixed(1);
-                await sendTempWarning(channel, `⏳ انتظر **${remaining}** ثانية.`, 3000);
+                const rem = ((AI_COOLDOWN_MS - (now - lastUsed)) / 1000).toFixed(1);
+                await sendTempWarning(channel, `⏳ انتظر **${rem}** ثانية.`, 3000);
                 return;
             }
-
-            userCooldowns.set(author.id, now);
+            threadCooldowns.set(author.id, now);
             resetThreadTimer(channel, author.id);
-            await handleAIResponse(author.id, userQuestion, channel, message);
+            await handleAIResponse(author.id, q, channel, message);
             return;
         }
 
-        // ── قناة ask-flux ─────────────────────────────────────────────────────
-        if (channel.name === ASK_FLUX_CHANNEL_NAME) {
-            const userQuestion = content.trim();
-            if (!userQuestion) return;
+        // ════════════════════════════════════════════════════════════════════
+        // ── قناة ask-flux ────────────────────────────────────────────────
+        // ════════════════════════════════════════════════════════════════════
+        // ✅ مقارنة case-insensitive + trim لتجنب أي فرق غير مرئي في الاسم
+        if (channel.name?.toLowerCase().trim() !== ASK_FLUX_CHANNEL_NAME) return;
 
-            const lastUsed = userCooldowns.get(author.id) || 0;
-            const now      = Date.now();
-            if (now - lastUsed < AI_COOLDOWN_MS) {
-                const remaining = ((AI_COOLDOWN_MS - (now - lastUsed)) / 1000).toFixed(1);
-                await sendTempWarning(channel, `⏳ **${author.username}**، انتظر **${remaining}** ثانية.`, 3000);
-                return;
-            }
-            userCooldowns.set(author.id, now);
+        const q = content.trim();
+        if (!q) return;
 
-            try {
-                const thread = await getOrCreateThread(message);
-                resetThreadTimer(thread, author.id);
-                await message.react('💬').catch(() => {});
-                await handleAIResponse(author.id, userQuestion, thread, null);
-            } catch (err) {
-                console.error('[THREAD CREATION FAILED]', err.message);
-                await sendTempWarning(channel, `❌ **${author.username}**، حدث خطأ في إنشاء الثريد.`, 5000);
-            }
+        console.log(`[ASK-FLUX] ${author.tag}: ${q.slice(0, 80)}`);
+
+        // كولداون
+        const lastUsed = askFluxCooldowns.get(author.id) || 0;
+        const now      = Date.now();
+        if (now - lastUsed < AI_COOLDOWN_MS) {
+            const rem = ((AI_COOLDOWN_MS - (now - lastUsed)) / 1000).toFixed(1);
+            await sendTempWarning(channel, `⏳ **${author.username}**، انتظر **${rem}** ثانية.`, 3000);
+            return;
         }
+        askFluxCooldowns.set(author.id, now);
+
+        // ✅ محاولة إنشاء ثريد — وإن فشل نرد مباشرة في القناة بدون توقف
+        let targetChannel = channel; // fallback: رد في ask-flux مباشرة
+        let usingThread   = false;
+
+        try {
+            const thread  = await getOrCreateThread(message);
+            targetChannel = thread;
+            usingThread   = true;
+            resetThreadTimer(thread, author.id);
+            await message.react('💬').catch(() => {});
+            console.log(`[ASK-FLUX] Thread ready: ${thread.id}`);
+        } catch (threadErr) {
+            console.error('[ASK-FLUX] Thread creation failed:', threadErr.message);
+            // البوت يرد مباشرة في ask-flux بدل ما يصمت
+            await channel.send(`⚠️ ما قدرت أنشئ ثريد، سأرد هنا مباشرة ${author}.`).catch(() => {});
+        }
+
+        await handleAIResponse(author.id, q, targetChannel, usingThread ? null : message);
     },
 };
