@@ -69,7 +69,7 @@ module.exports = {
                 badges,
             });
 
-            const attachment = new AttachmentBuilder(rankBuffer, { name: 'rank.png' });
+            const attachment = new AttachmentBuilder(buffer, { name: 'rank.gif' });
 
             await interaction.editReply({
                 content: `${tier.emoji} **${target.displayName}** — ${tier.name} • مستوى ${level}`,
