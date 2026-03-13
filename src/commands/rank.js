@@ -14,7 +14,7 @@ module.exports = {
         ),
 
     async execute(interaction) {
-        await interaction.deferReply();
+       await interaction.editReply({ files: [attachment] });
 
         const target    = interaction.options.getMember('member') ?? interaction.member;
         const { guild } = interaction;
