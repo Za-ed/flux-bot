@@ -31,7 +31,7 @@ const client = new Client({
 client.commands  = new Collection();
 client.cooldowns = new Collection();
 
-// ─── تحميل الأوامر (يدعم مجلدات فرعية + ملفات مباشرة) ───────────────────────
+// ─── تحميل الأوامر ────────────────────────────────────────────────────────────
 const commandsPath = path.join(__dirname, 'commands');
 
 function loadCommands(dir) {
@@ -39,7 +39,7 @@ function loadCommands(dir) {
   for (const item of items) {
     const itemPath = path.join(dir, item);
     if (fs.lstatSync(itemPath).isDirectory()) {
-      loadCommands(itemPath); // مجلد فرعي
+      loadCommands(itemPath);
     } else if (item.endsWith('.js')) {
       const command = require(itemPath);
       if ('data' in command && 'execute' in command) {
@@ -55,20 +55,24 @@ function loadCommands(dir) {
 loadCommands(commandsPath);
 
 // ─── تحميل الأحداث ────────────────────────────────────────────────────────────
+// ⬇️ يحمل chillChat.js تلقائياً لأنه في مجلد events وعنده name و execute
 const eventsPath = path.join(__dirname, 'events');
-for (const file of fs.readdirSync(eventsPath).filter((f) => f.endsWith('.js'))) {
+const eventFiles = fs.readdirSync(eventsPath).filter((f) => f.endsWith('.js'));
+
+for (const file of eventFiles) {
   const event = require(path.join(eventsPath, file));
   if (!event.name) continue;
+
   if (event.once) {
     client.once(event.name, (...args) => event.execute(...args, client));
   } else {
     client.on(event.name, (...args) => event.execute(...args, client));
   }
-  console.log(`[EVENTS] Loaded: ${event.name}`);
+  console.log(`[EVENTS] Loaded: ${event.name} (${file})`);
 }
 
 // ─── Anti-Crash ───────────────────────────────────────────────────────────────
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
   console.error('[ANTI-CRASH] Unhandled Rejection:', reason);
 });
 process.on('uncaughtException', (err) => {

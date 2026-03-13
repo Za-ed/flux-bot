@@ -14,7 +14,8 @@ module.exports = {
         ),
 
     async execute(interaction) {
-       await interaction.editReply({ files: [attachment] });
+        // 1. مهم جداً: تأخير الرد لأن توليد الـ GIF يأخذ وقتاً (أكثر من 3 ثوانٍ)
+        await interaction.deferReply();
 
         const target    = interaction.options.getMember('member') ?? interaction.member;
         const { guild } = interaction;
@@ -37,14 +38,6 @@ module.exports = {
                 ? { name: tierRaw, emoji: '✦' }
                 : (tierRaw || { name: 'مبتدئ', emoji: '✦' });
 
-            // ── الشارات ──────────────────────────────────────────────────────
-            let badges = [];
-            try {
-                if (typeof getUserBadges === 'function') {
-                    badges = getUserBadges(guild.id, target.id) || [];
-                }
-            } catch { /* لا نوقف التنفيذ إذا فشلت الشارات */ }
-
             // ── دقائق الصوت ──────────────────────────────────────────────────
             let voiceMinutes = 0;
             try {
@@ -57,47 +50,28 @@ module.exports = {
             // ── توليد بطاقة الرانك ───────────────────────────────────────────
             const avatarURL  = target.user.displayAvatarURL({ extension: 'png', size: 256 });
 
-            // ... داخل دالة execute ...
-// 1. قم بحذف سطر editReply الموجود في البداية
-// 2. تأكد من تعريف الـ attachment بهذا الشكل بعد توليد البطاقة:
+            const rankBuffer = await generateRankCard({
+                username:    target.user.username,
+                displayName: target.displayName,
+                avatarURL,
+                level,
+                currentXP:   xp,
+                xpForNext:   xpNeeded,
+                rank:        rankPos ?? '—',
+                voiceMinutes,
+            });
 
-const rankBuffer = await generateRankCard({
-    username:    target.user.username,
-    displayName: target.displayName,
-    avatarURL,
-    level,
-    currentXP:   xp,
-    xpForNext:   xpNeeded,
-    rank:        rankPos ?? '—',
-    voiceMinutes,
-    badges,
-});
+            // الحل الجذري: اسم ملف متغير لكسر الـ Cache وتمرير الـ Buffer الصحيح
+            const attachment = new AttachmentBuilder(rankBuffer, { name: `rank-${Date.now()}-${target.id}.gif` });
 
-// ملاحظة: استخدم rankBuffer وليس buffer
-const attachment = new AttachmentBuilder(rankBuffer, { name: `rank-${Date.now()}.gif` });
-
-await interaction.editReply({
-    content: `${tier.emoji} **${target.displayName}** — ${tier.name} • مستوى ${level}`,
-    files:   [attachment],
-});
+            await interaction.editReply({
+                content: `${tier.emoji} **${target.displayName}** — ${tier.name} • مستوى ${level}`,
+                files:   [attachment],
+            });
 
         } catch (error) {
             console.error('[RANK ERROR]:', error);
-
-            // ── رد احتياطي نصي عند الفشل ─────────────────────────────────────
-            try {
-                const fallback = (await getUserData(guild.id, target.id)) || {};
-                const fallbackRank = await getUserRank(guild.id, target.id);
-
-                await interaction.editReply({
-                    content: `📊 **إحصائيات ${target.displayName}**\n` +
-                             `• المستوى: \`${fallback.level || 0}\`\n` +
-                             `• الخبرة:  \`${fallback.xp    || 0}\`\n` +
-                             `• الترتيب: \`#${fallbackRank ?? '—'}\``,
-                });
-            } catch {
-                await interaction.editReply({ content: '❌ حدث خطأ غير متوقع. حاول مرة أخرى.' }).catch(() => {});
-            }
+            await interaction.editReply({ content: '❌ حدث خطأ أثناء توليد البطاقة.' }).catch(() => {});
         }
     },
 };

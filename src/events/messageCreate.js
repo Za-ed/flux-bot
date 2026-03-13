@@ -1,7 +1,9 @@
-// ✅ تصحيح مسارات الملفات المطلوبة 
-const { handleCodeRun }       = require('./codeRunner'); // كما كان لديك أساساً
-const { handleChillMessage }  = require('./chillChat');  // كما كان لديك أساساً
-const { handleGamingMessage } = require('./gamingCorner'); // تم تعديله لـ ./ لأن كلاهما بـ events
+// ─── events/messageCreate.js ─────────────────────────────────────────────────
+// ⚠️ chillChat.js أُزيل من هنا لأنه يعمل كـ event مستقل تلقائياً
+// ══════════════════════════════════════════════════════════════════════════════
+
+const { handleCodeRun }       = require('./codeRunner');
+const { handleGamingMessage } = require('./gamingCorner');
 const { trackMessage }        = require('../utils/dailyReport');
 const Groq = require('groq-sdk');
 
@@ -240,10 +242,10 @@ module.exports = {
         const { author, member, channel, content } = message;
 
         // ── الوحدات الخارجية ──────────────────────────────────────────────────
+        // ملاحظة: chillChat.js يعمل كـ event مستقل — لا تستدعيه هنا تجنباً للتكرار
         try {
             if (typeof handleCodeRun       === 'function') await handleCodeRun(message);
-            if (typeof handleChillMessage  === 'function') await handleChillMessage(message);
-            if (typeof handleGamingMessage === 'function') await handleGamingMessage(message); 
+            if (typeof handleGamingMessage === 'function') await handleGamingMessage(message);
         } catch (err) { console.error('[MODULE ERROR]', err.message); }
 
         // ── إحصاءات يومية ────────────────────────────────────────────────────
@@ -297,7 +299,7 @@ module.exports = {
         }
 
         // ════════════════════════════════════════════════════════════════════
-        // ── قناة ask-flux ────────────────────────────────────────────────
+        // ── قناة ask-flux ─────────────────────────────────────────────────
         // ════════════════════════════════════════════════════════════════════
         if (channel.name?.toLowerCase().trim() !== ASK_FLUX_CHANNEL_NAME) return;
 
@@ -317,7 +319,7 @@ module.exports = {
         askFluxCooldowns.set(author.id, now);
 
         // محاولة إنشاء ثريد — وإن فشل نرد مباشرة في القناة بدون توقف
-        let targetChannel = channel; 
+        let targetChannel = channel;
         let usingThread   = false;
 
         try {
