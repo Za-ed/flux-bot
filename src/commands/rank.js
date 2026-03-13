@@ -13,14 +13,15 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    // 1. تأجيل الرد عشان البوت ياخذ وقته بتصميم الصورة بدون ما يطلع (التطبيق لا يستجيب)
+    // 1. أول خطوة دائماً: نطلب وقت إضافي من ديسكورد عشان ما يعطينا Timeout
     await interaction.deferReply();
 
     const target = interaction.options.getMember('member') ?? interaction.member;
     const { guild } = interaction;
 
     // ── بيانات الـ XP ─────────────────────────────────────────────────────
-    const userData = getUserLevel(guild.id, target.id) || {};
+    // 🔴 التصليح هنا: أضفنا await عشان البوت يستنى الداتابيز تجيب بياناتك الحقيقية
+    const userData = (await getUserLevel(guild.id, target.id)) || {};
     const level = userData.level || 0;
     const xp = userData.xp || 0;
     const xpNeeded  = xpForLevel(level + 1);
@@ -29,7 +30,8 @@ module.exports = {
     // ── الترتيب في اللوحة ─────────────────────────────────────────────────
     let rankPos = '?';
     try {
-        const leaderboard = getLeaderboard(guild.id, 1000) || [];
+        // 🔴 التصليح هنا: أضفنا await لجلب لوحة الصدارة صح
+        const leaderboard = (await getLeaderboard(guild.id, 1000)) || [];
         const index = leaderboard.findIndex((u) => u.userId === target.id);
         if (index !== -1) rankPos = index + 1;
     } catch {}
@@ -54,8 +56,8 @@ module.exports = {
           displayName: target.displayName,
           avatarURL,
           level,
-          currentXP:  xp,
-          xpForNext:  xpNeeded,
+          currentXP:   xp,
+          xpForNext:   xpNeeded,
           rank:        rankPos,
           voiceMinutes,
           badges,
@@ -63,7 +65,7 @@ module.exports = {
 
         const attachment = new AttachmentBuilder(rankBuffer, { name: 'rank.gif' });
 
-        // 2. إرسال الرد النهائي (هنا نستخدم editReply لأننا عملنا deferReply فوق)
+        // 2. إرسال الرد النهائي
         await interaction.editReply({
           content: `${tier.emoji} **${target.displayName}** — ${tier.name} • مستوى ${level}`,
           files:   [attachment],
@@ -71,7 +73,7 @@ module.exports = {
         
     } catch (error) {
         console.error('[RANK ERROR]:', error);
-        await interaction.editReply('❌ حدث خطأ أثناء توليد بطاقة الرانك الخاصة بك.');
+        await interaction.editReply('❌ حدث خطأ أثناء توليد الصورة، يرجى المحاولة لاحقاً.');
     }
   },
 };

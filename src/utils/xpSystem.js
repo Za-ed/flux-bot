@@ -133,6 +133,7 @@ async function getLeaderboard(guildId, limit = 10) {
 
 module.exports = {
     init: connect,
+    getUserData,
     addMessageXP,
     addInviteXP,
     claimDaily,
