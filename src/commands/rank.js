@@ -57,24 +57,29 @@ module.exports = {
             // ── توليد بطاقة الرانك ───────────────────────────────────────────
             const avatarURL  = target.user.displayAvatarURL({ extension: 'png', size: 256 });
 
-            const rankBuffer = await generateRankCard({
-                username:    target.user.username,
-                displayName: target.displayName,
-                avatarURL,
-                level,
-                currentXP:   xp,
-                xpForNext:   xpNeeded,
-                rank:        rankPos ?? '—',
-                voiceMinutes,
-                badges,
-            });
+            // ... داخل دالة execute ...
+// 1. قم بحذف سطر editReply الموجود في البداية
+// 2. تأكد من تعريف الـ attachment بهذا الشكل بعد توليد البطاقة:
 
-            const attachment = new AttachmentBuilder(buffer, { name: 'rank.gif' });
+const rankBuffer = await generateRankCard({
+    username:    target.user.username,
+    displayName: target.displayName,
+    avatarURL,
+    level,
+    currentXP:   xp,
+    xpForNext:   xpNeeded,
+    rank:        rankPos ?? '—',
+    voiceMinutes,
+    badges,
+});
 
-            await interaction.editReply({
-                content: `${tier.emoji} **${target.displayName}** — ${tier.name} • مستوى ${level}`,
-                files:   [attachment],
-            });
+// ملاحظة: استخدم rankBuffer وليس buffer
+const attachment = new AttachmentBuilder(rankBuffer, { name: `rank-${Date.now()}.gif` });
+
+await interaction.editReply({
+    content: `${tier.emoji} **${target.displayName}** — ${tier.name} • مستوى ${level}`,
+    files:   [attachment],
+});
 
         } catch (error) {
             console.error('[RANK ERROR]:', error);

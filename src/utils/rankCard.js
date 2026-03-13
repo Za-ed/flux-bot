@@ -50,22 +50,20 @@ function hexToRgb(hex) {
   return { r, g, b };
 }
 
-// بيانات النجوم
 const STARS_DATA = [
   [220,28,1.2,0.5, 2], [380,55,0.8,0.4, 3], [500,20,1.4,0.6, 1], [620,45,0.9,0.3, 4],
   [720,22,1.1,0.5, 2], [800,60,0.7,0.4, 5], [310,80,1.0,0.3, 3], [450,210,0.8,0.35, 2],
   [560,230,1.2,0.4, 4], [680,200,0.9,0.3, 1], [160,200,1.0,0.25, 3], [840,160,1.3,0.45, 2],
-  [260,230,0.7,0.3, 5], [340,170,1.1,0.25, 2], [590,85,0.8,0.35, 4], [740,140,1.0,0.3, 3]
 ];
 
 function drawAnimatedStars(ctx, W, H, progressLoop) {
   ctx.save();
   for (let i = 0; i < STARS_DATA.length; i++) {
     const [baseX, y, r, baseA, speed] = STARS_DATA[i];
-    let x = baseX - (progressLoop * 50) % W;
+    let x = baseX - (progressLoop * 100) % W; // زيادة سرعة النجوم
     if (x < 0) x += W;
-    const a = baseA + Math.sin(progressLoop * Math.PI * 2 * speed) * 0.3;
-    const clampedA = Math.max(0, Math.min(1, a));
+    const a = baseA + Math.sin(progressLoop * Math.PI * 2 * speed) * 0.4;
+    const clampedA = Math.max(0.1, Math.min(1, a));
     ctx.fillStyle = `rgba(255,255,255,${clampedA})`;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -74,7 +72,21 @@ function drawAnimatedStars(ctx, W, H, progressLoop) {
   ctx.restore();
 }
 
-// ─── البناء الرئيسي للـ GIF (النسخة السريعة 🚀) ──────────────────────────
+function drawAnimatedDotGrid(ctx, W, H, progressLoop) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+  const offsetX = progressLoop * 50; // زيادة سرعة حركة الشبكة
+  for (let x = -50; x < W + 50; x += 25) {
+    for (let y = 20; y < H; y += 25) {
+      ctx.beginPath();
+      ctx.arc(x - (offsetX % 25), y, 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// ─── البناء الرئيسي للـ GIF ────────────────────────────────────────────────
 async function generateRankCard({
   username, displayName, avatarURL,
   level, currentXP, xpForNext,
@@ -84,12 +96,11 @@ async function generateRankCard({
   const canvas = createCanvas(W, H);
   const ctx    = canvas.getContext('2d');
 
-  // 🔥 تسريع التشفير لأقصى حد 🔥
-  const encoder = new GIFEncoder(W, H, 'neuquant', true);
+  const encoder = new GIFEncoder(W, H);
   encoder.start();
   encoder.setRepeat(0);
-  encoder.setDelay(60); // زيادة سرعة العرض
-  encoder.setQuality(30); // 30 = أسرع معالجة ممكنة للـ GIF بدون تضحية كبيرة بالجودة
+  encoder.setDelay(60); // زيادة التأخير قليلاً لجعل الحركة أوضح
+  encoder.setQuality(10);
 
   const tier = getTier(level);
   const targetPct = xpForNext > 0 ? Math.min(currentXP / xpForNext, 1) : 0;
@@ -104,17 +115,17 @@ async function generateRankCard({
     console.error("فشل تحميل صورة الأفاتار", err);
   }
 
-  // 🔥 تقليل الإطارات إلى 15 لتسريع العمل 50% 🔥
-  const totalFrames = 15; 
+  const totalFrames = 20; // تقليل الفريمات لتقليل حجم الملف وزيادة سرعة التحميل
 
   for (let f = 0; f < totalFrames; f++) {
     const progressLoop = f / totalFrames; 
-    const xpAnimationProgress = Math.min(1, f / 8); // شريط الـ XP يمتلئ بسرعة
+    const xpAnimationProgress = Math.min(1, f / 10);
     const currentAnimatedPct = xpAnimationProgress * targetPct;
+    const pulse = Math.sin(progressLoop * Math.PI * 2) * 0.25 + 0.75; 
 
     ctx.clearRect(0, 0, W, H);
 
-    // ── خلفية (تم تخفيفها لتسريع المعالجة) ──
+    // ── خلفية ──
     const bgGrad = ctx.createLinearGradient(0, 0, W, H);
     bgGrad.addColorStop(0,   tier.bg1);
     bgGrad.addColorStop(0.5, tier.bg2);
@@ -124,16 +135,17 @@ async function generateRankCard({
     ctx.fill();
 
     const glowR = ctx.createRadialGradient(W*0.88, H*0.5, 0, W*0.88, H*0.5, H*0.8);
-    glowR.addColorStop(0, `rgba(${gr},${gg},${gb},0.12)`);
+    glowR.addColorStop(0, `rgba(${gr},${gg},${gb},${0.15 * pulse})`);
     glowR.addColorStop(1, `rgba(${gr},${gg},${gb},0)`);
     ctx.fillStyle = glowR;
     roundRect(ctx, 0, 0, W, H, 20);
     ctx.fill();
 
     drawAnimatedStars(ctx, W, H, progressLoop);
+    drawAnimatedDotGrid(ctx, W, H, progressLoop);
 
-    ctx.strokeStyle = `rgba(${gr},${gg},${gb},0.35)`;
-    ctx.lineWidth   = 1.5;
+    ctx.strokeStyle = `rgba(${gr},${gg},${gb},0.4)`;
+    ctx.lineWidth   = 2;
     roundRect(ctx, 1, 1, W-2, H-2, 20);
     ctx.stroke();
 
@@ -144,10 +156,13 @@ async function generateRankCard({
     ctx.lineTo(755, 230);
     ctx.stroke();
 
-    const AX = 138, AY = 130, AR = 66, avatarRadius = 22;
+    const AX = 138, AY = 130, AR = 66;
+    const avatarRadius = 22;
 
     ctx.save();
-    ctx.strokeStyle = `rgba(${gr},${gg},${gb},0.8)`;
+    ctx.shadowColor = tier.glow;
+    ctx.shadowBlur  = 25 * pulse;
+    ctx.strokeStyle = `rgba(${gr},${gg},${gb},${0.9 * pulse})`;
     ctx.lineWidth   = 3;
     roundRect(ctx, AX - AR - 6, AY - AR - 6, (AR + 6) * 2, (AR + 6) * 2, avatarRadius + 4);
     ctx.stroke();
@@ -178,11 +193,15 @@ async function generateRankCard({
 
     // ── اسم المستخدم ──
     const TX = 270;
+    ctx.save();
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'middle';
     ctx.font         = 'bold 36px Bricolage, Arial, sans-serif';
     ctx.fillStyle    = '#ffffff';
+    ctx.shadowColor  = `rgba(${gr},${gg},${gb},${0.6 * pulse})`;
+    ctx.shadowBlur   = 12;
     ctx.fillText(displayName || username || 'Unknown', TX, 75);
+    ctx.restore();
 
     // ── badge الرتبة ──
     const tierLabel = `${tier.label}  LVL.${level}`;
@@ -190,14 +209,14 @@ async function generateRankCard({
     const labelW = ctx.measureText(tierLabel).width + 28;
 
     const badgeGrad = ctx.createLinearGradient(TX, 0, TX + labelW, 0);
-    badgeGrad.addColorStop(0, `rgba(${gr},${gg},${gb},0.25)`);
-    badgeGrad.addColorStop(1, `rgba(${gr},${gg},${gb},0.08)`);
+    badgeGrad.addColorStop(0, `rgba(${gr},${gg},${gb},0.3)`);
+    badgeGrad.addColorStop(1, `rgba(${gr},${gg},${gb},0.1)`);
     ctx.fillStyle = badgeGrad;
     roundRect(ctx, TX, 105, labelW, 26, 13);
     ctx.fill();
 
-    ctx.strokeStyle = `rgba(${gr},${gg},${gb},0.4)`;
-    ctx.lineWidth   = 1;
+    ctx.strokeStyle = `rgba(${gr},${gg},${gb},0.5)`;
+    ctx.lineWidth   = 1.5;
     roundRect(ctx, TX, 105, labelW, 26, 13);
     ctx.stroke();
 
@@ -208,35 +227,38 @@ async function generateRankCard({
 
     // ── PROGRESS label ──
     ctx.font      = '11px GeistMono, monospace';
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.fillText('PROGRESS', TX, 150);
 
-    // XP
     const currentDisplayXP = Math.floor(currentAnimatedPct * xpForNext);
     const xpText = `${currentDisplayXP.toLocaleString()} / ${xpForNext.toLocaleString()} XP  •  ${Math.round(currentAnimatedPct * 100)}%`;
     ctx.textAlign = 'right';
     ctx.fillText(xpText, TX + 460, 150);
 
     const BX = TX, BY = 165, BW = 460, BH = 12;
-
-    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
     roundRect(ctx, BX, BY, BW, BH, 6);
     ctx.fill();
 
     if (currentAnimatedPct > 0.01) {
       const fillW   = Math.max(BH, BW * currentAnimatedPct);
       const barGrad = ctx.createLinearGradient(BX, 0, BX + fillW, 0);
-      barGrad.addColorStop(0, `rgba(${gr},${gg},${gb},0.7)`);
+      barGrad.addColorStop(0, `rgba(${gr},${gg},${gb},0.8)`);
       barGrad.addColorStop(1, tier.barEnd);
       
+      ctx.save();
       ctx.fillStyle   = barGrad;
+      ctx.shadowColor = tier.glow;
+      ctx.shadowBlur  = 10 * pulse;
       roundRect(ctx, BX, BY, fillW, BH, 6);
       ctx.fill();
       
       ctx.fillStyle = '#ffffff';
+      ctx.shadowBlur = 15 * pulse;
       ctx.beginPath();
       ctx.arc(BX + fillW - 4, BY + BH / 2, BH * 0.7, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
     }
 
     // ── الإحصاءات الثلاث ──
@@ -249,16 +271,19 @@ async function generateRankCard({
     const SX = 768, cardW = 112, cardH = 62, cardGap = 9;
     stats.forEach((s, i) => {
       const sy = 28 + i * (cardH + cardGap);
-
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
       roundRect(ctx, SX, sy, cardW, cardH, 8);
       ctx.fill();
 
+      ctx.save();
       ctx.fillStyle = tier.glow;
+      ctx.shadowColor = tier.glow;
+      ctx.shadowBlur = 6 * pulse;
       roundRect(ctx, SX, sy, 4, cardH, 8);
       ctx.fill();
+      ctx.restore();
 
-      ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.lineWidth   = 1;
       roundRect(ctx, SX, sy, cardW, cardH, 8);
       ctx.stroke();
@@ -266,18 +291,22 @@ async function generateRankCard({
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
       ctx.font         = '10px GeistMono, monospace';
-      ctx.fillStyle    = 'rgba(255,255,255,0.4)';
+      ctx.fillStyle    = 'rgba(255,255,255,0.5)';
       ctx.fillText(s.label, SX + cardW / 2, sy + 20);
 
+      ctx.save();
       ctx.font        = 'bold 24px Bricolage, Arial';
       ctx.fillStyle   = tier.glow;
+      ctx.shadowColor = tier.glow;
+      ctx.shadowBlur  = 8 * pulse;
       ctx.fillText(s.value, SX + cardW / 2, sy + 44);
+      ctx.restore();
     });
 
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'middle';
     ctx.font         = '10px GeistMono, monospace';
-    ctx.fillStyle    = 'rgba(255,255,255,0.18)';
+    ctx.fillStyle    = 'rgba(255,255,255,0.2)';
     ctx.fillText('FLUX  •  IO', W / 2, H - 15);
 
     encoder.addFrame(ctx);
