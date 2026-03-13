@@ -20,21 +20,27 @@ const CACHE_CLEANUP_MS      = 10 * 60 * 1000;
 const MAX_HISTORY_LENGTH    = 10;
 
 // ─── Groq Client (Singleton) ──────────────────────────────────────────────────
-// ✅ إنشاء client مرة واحدة بدل إعادة إنشائه في كل طلب (أسرع وأوفر بالموارد)
 const groqClient = new Groq({ apiKey: GROQ_KEY });
 
 // ─── Stores ───────────────────────────────────────────────────────────────────
 const spamMap             = new Map();
 const conversationHistory = new Map();
-const userCooldowns       = new Map();
-const userThreads         = new Map();
-const threadTimers        = new Map();
 
-// ✅ تنظيف دوري لمنع تسرب الذاكرة مع كثرة المستخدمين
+// ✅ كولداون منفصل لكل سياق — ask-flux وثريد ما يتشاركون نفس الكولداون
+const askFluxCooldowns    = new Map(); // cooldown قناة ask-flux فقط
+const threadCooldowns     = new Map(); // cooldown الثريد فقط
+
+const userThreads         = new Map(); // userId -> threadId
+const threadTimers        = new Map(); // threadId -> timeoutId
+
+// ─── تنظيف دوري لمنع تسرب الذاكرة ───────────────────────────────────────────
 setInterval(() => {
     const now = Date.now();
-    for (const [key, ts] of userCooldowns.entries()) {
-        if (now - ts > CACHE_CLEANUP_MS) userCooldowns.delete(key);
+    for (const [key, ts] of askFluxCooldowns.entries()) {
+        if (now - ts > CACHE_CLEANUP_MS) askFluxCooldowns.delete(key);
+    }
+    for (const [key, ts] of threadCooldowns.entries()) {
+        if (now - ts > CACHE_CLEANUP_MS) threadCooldowns.delete(key);
     }
     for (const [key, data] of spamMap.entries()) {
         const lastTs = data.timestamps.at(-1) ?? 0;
@@ -72,7 +78,6 @@ async function sendTempWarning(channel, content, deleteAfterMs = 5000) {
     } catch {}
 }
 
-// ✅ تحسين: كشف اللغة بنسبة الأحرف العربية بدل مجرد وجودها
 function detectLanguage(text) {
     const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
     return arabicChars / text.length > 0.3 ? 'arabic' : 'english';
@@ -91,6 +96,7 @@ function resetThreadTimer(thread, userId) {
         userThreads.delete(userId);
         threadTimers.delete(thread.id);
         conversationHistory.delete(userId);
+        threadCooldowns.delete(userId);
         console.log(`[THREAD] Auto-deleted thread for user ${userId}`);
     }, THREAD_INACTIVITY_MS);
 
@@ -101,13 +107,34 @@ function resetThreadTimer(thread, userId) {
 async function getOrCreateThread(message) {
     const { author, guild } = message;
 
+    // ✅ الإصلاح الجوهري: نتحقق أن الثريد فعلاً موجود وليس مجرد ID قديم في الـ Map
     if (userThreads.has(author.id)) {
-        const existing = guild.channels.cache.get(userThreads.get(author.id));
-        if (existing && !existing.archived && !existing.deleted) return existing;
+        const threadId       = userThreads.get(author.id);
+        // نحاول نجلب الثريد من الـ cache أولاً، وإن ما كان نجلبه من Discord
+        let existingThread   = guild.channels.cache.get(threadId);
+
+        // لو مش في الكاش، نحاول نجلبه من Discord مباشرة
+        if (!existingThread) {
+            try {
+                existingThread = await guild.channels.fetch(threadId);
+            } catch {
+                existingThread = null; // الثريد محذوف أو غير موجود
+            }
+        }
+
+        // الثريد موجود وليس مؤرشفاً → أعد استخدامه
+        if (existingThread && !existingThread.archived) {
+            return existingThread;
+        }
+
+        // الثريد محذوف أو مؤرشف → نظّف البيانات القديمة
         userThreads.delete(author.id);
         conversationHistory.delete(author.id);
+        threadCooldowns.delete(author.id);
+        if (existingThread?.id) threadTimers.delete(existingThread.id);
     }
 
+    // إنشاء ثريد جديد
     const thread = await message.startThread({
         name:                `💬 ${author.username} — FLUX AI`,
         autoArchiveDuration: 60,
@@ -121,7 +148,7 @@ async function getOrCreateThread(message) {
         `هذا ثريدك الخاص مع **FLUX AI**.\n\n` +
         `> 💡 اسألني أي شيء — برمجة، معرفة عامة، أو محادثة عادية.\n` +
         `> 🧹 اكتب \`!مسح\` أو \`!clear\` لمسح تاريخ المحادثة.\n` +
-        `> 📊 اكتب \`!تاريخ\` لرؤية عدد الرسائل في محادثتك الحالية.\n` +
+        `> 📊 اكتب \`!تاريخ\` لعرض عدد الرسائل الحالية في المحادثة.\n` +
         `> ⏰ سيتم حذف الثريد تلقائياً بعد **دقيقتين** من عدم النشاط.`
     );
 
@@ -167,7 +194,7 @@ Rules:
     return text;
 }
 
-// ─── AI Response Handler (موحّد) ──────────────────────────────────────────────
+// ─── AI Response Handler ──────────────────────────────────────────────────────
 async function handleAIResponse(userId, question, targetChannel, originalMessage = null) {
     let typingInterval = null;
 
@@ -198,9 +225,8 @@ async function handleAIResponse(userId, question, targetChannel, originalMessage
             await originalMessage.react('❌').catch(() => {});
         }
 
-        // ✅ تمييز أنواع الأخطاء برسائل مناسبة
         let errMsg = '❌ عذراً، حدث خطأ. حاول مجدداً بعد قليل.';
-        if (err?.status === 429 || err?.message?.includes('rate'))    errMsg = '⏳ الخادم مشغول حالياً، انتظر ثوانٍ وحاول مجدداً.';
+        if (err?.status === 429 || err?.message?.includes('rate'))         errMsg = '⏳ الخادم مشغول حالياً، انتظر ثوانٍ وحاول مجدداً.';
         if (err?.message?.includes('timeout') || err?.code === 'ETIMEDOUT') errMsg = '⌛ انتهت مهلة الاتصال. حاول مجدداً.';
 
         await targetChannel.send(errMsg).catch(() => {});
@@ -228,7 +254,6 @@ async function handleAntiSpam(message) {
         const idsToDelete = [...spamData.messageIds];
         spamMap.delete(author.id);
 
-        // ✅ حذف الرسائل بالتوازي بدل الواحدة تلو الأخرى (أسرع)
         await Promise.allSettled(
             idsToDelete.map((id) =>
                 channel.messages.fetch(id).then((m) => m.delete()).catch(() => {})
@@ -286,12 +311,13 @@ module.exports = {
 
         // ── ردود داخل ثريد AI ─────────────────────────────────────────────────
         if (channel.isThread()) {
+            // تجاهل أي ثريد ليس خاصاً بهذا المستخدم
             if (userThreads.get(author.id) !== channel.id) return;
 
             const userQuestion = content.trim();
             if (!userQuestion) return;
 
-            // أوامر الثريد
+            // أوامر خاصة
             if (userQuestion === '!clear' || userQuestion === '!مسح') {
                 conversationHistory.delete(author.id);
                 await channel.send('🧹 تم مسح تاريخ محادثتك. نبدأ من جديد!');
@@ -299,7 +325,6 @@ module.exports = {
                 return;
             }
 
-            // ✅ أمر جديد: عرض حجم التاريخ الحالي
             if (userQuestion === '!تاريخ' || userQuestion === '!history') {
                 const count = conversationHistory.get(author.id)?.length ?? 0;
                 await channel.send(`📊 عدد الرسائل في محادثتك الحالية: **${count}** / ${MAX_HISTORY_LENGTH}`);
@@ -307,7 +332,8 @@ module.exports = {
                 return;
             }
 
-            const lastUsed = userCooldowns.get(author.id) || 0;
+            // كولداون الثريد (مستقل عن ask-flux)
+            const lastUsed = threadCooldowns.get(author.id) || 0;
             const now      = Date.now();
             if (now - lastUsed < AI_COOLDOWN_MS) {
                 const remaining = ((AI_COOLDOWN_MS - (now - lastUsed)) / 1000).toFixed(1);
@@ -315,35 +341,45 @@ module.exports = {
                 return;
             }
 
-            userCooldowns.set(author.id, now);
+            threadCooldowns.set(author.id, now);
             resetThreadTimer(channel, author.id);
             await handleAIResponse(author.id, userQuestion, channel, message);
             return;
         }
 
-        // ── قناة ask-flux ─────────────────────────────────────────────────────
+        // ── قناة ask-flux (إنشاء ثريد + رد أول) ─────────────────────────────
         if (channel.name === ASK_FLUX_CHANNEL_NAME) {
             const userQuestion = content.trim();
             if (!userQuestion) return;
 
-            const lastUsed = userCooldowns.get(author.id) || 0;
+            // كولداون ask-flux (مستقل عن الثريد)
+            const lastUsed = askFluxCooldowns.get(author.id) || 0;
             const now      = Date.now();
             if (now - lastUsed < AI_COOLDOWN_MS) {
                 const remaining = ((AI_COOLDOWN_MS - (now - lastUsed)) / 1000).toFixed(1);
                 await sendTempWarning(channel, `⏳ **${author.username}**، انتظر **${remaining}** ثانية.`, 3000);
                 return;
             }
-            userCooldowns.set(author.id, now);
+            askFluxCooldowns.set(author.id, now);
 
+            let thread;
             try {
-                const thread = await getOrCreateThread(message);
-                resetThreadTimer(thread, author.id);
-                await message.react('💬').catch(() => {});
-                await handleAIResponse(author.id, userQuestion, thread, null);
+                thread = await getOrCreateThread(message);
             } catch (err) {
                 console.error('[THREAD CREATION FAILED]', err.message);
-                await sendTempWarning(channel, `❌ **${author.username}**، حدث خطأ في إنشاء الثريد.`, 5000);
+                await sendTempWarning(
+                    channel,
+                    `❌ **${author.username}**، فشل إنشاء الثريد. تأكد أن البوت لديه صلاحية \`Create Threads\`.`,
+                    8000
+                );
+                return;
             }
+
+            resetThreadTimer(thread, author.id);
+            await message.react('💬').catch(() => {});
+
+            // ✅ الرد الأول في الثريد مباشرة من ask-flux
+            await handleAIResponse(author.id, userQuestion, thread, null);
         }
     },
 };
