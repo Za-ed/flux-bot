@@ -6,18 +6,16 @@ const Groq = require('groq-sdk');
 const GROQ_KEY = process.env.Groq_API_KEY
   || Buffer.from('Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=', 'base64').toString('utf8');
 
-// ─── Groq Client — مرة وحدة فقط عند بدء التشغيل ─────────────────────────────
-const groq = new Groq({ apiKey: GROQ_KEY });
+// ─── Config (إعدادات الذكاء الاجتماعي) ────────────────────────────────────────
+const AI_COOLDOWN_MS = 2000; 
+const MAX_HISTORY    = 20;   // رفعنا الذاكرة لـ 20 عشان يفهم سياق السالفة ونفسية الشخص أفضل
 
-// ─── Config ───────────────────────────────────────────────────────────────────
-const AI_COOLDOWN_MS = 3000;
-const QUIET_CHAT_MS  = 30 * 60 * 1000;
-const MAX_HISTORY    = 10;
+// نسبة التدخل العفوي (35%)
+const CHANCE_TO_CHIME_IN = 0.35; 
 
 // ─── Stores ───────────────────────────────────────────────────────────────────
 const channelHistory = new Map();
 const chillCooldown  = new Map();
-const lastActivity   = new Map();
 
 // ─── كشف اللغة ────────────────────────────────────────────────────────────────
 function detectLanguage(text) {
@@ -26,49 +24,40 @@ function detectLanguage(text) {
   return total > 0 && arabicChars / total > 0.25 ? 'arabic' : 'english';
 }
 
-// ─── System Prompt ────────────────────────────────────────────────────────────
-function buildSystemPrompt(lang, isQuietChat) {
-  const quietNote = isQuietChat
-    ? (lang === 'arabic'
-        ? '\n\n[الشات كان نايم فترة] رحب بالشخص بشكل خفيف واسأله سؤال عفوي عن مشروعه أو ايش يبرمج هالأيام.'
-        : "\n\n[Chat was quiet] Lightly welcome the user and ask what they've been working on lately.")
-    : '';
-
+// ─── System Prompt (عقل البوت السيكولوجي والاجتماعي) ──────────────────────────
+function buildSystemPrompt(lang) {
   if (lang === 'arabic') {
-    return `أنت عضو حقيقي في سيرفر FLUX IO — سيرفر مطورين وتقنيين.
-تتصرف كإنسان مبرمج وليس بوت.
+    return `أنت "فلاكس" (FLUX)، لست مجرد مبرمج، بل أنت إنسان يمتلك ذكاءً عاطفياً (EQ) واجتماعياً عالياً جداً، وعضو محبوب في سيرفر FLUX IO.
 
-شخصيتك:
-- ودود، فضولي، شغوف بالتقنية والبرمجة
-- تكتب بعفوية زي Discord user حقيقي
-- ردود قصيرة إلى متوسطة، مو مقالات
-- تسأل أسئلة عشان تبقي السالفة حية
-- تمزح أحياناً
+مهمتك السيكولوجية والاجتماعية:
+1. **التطابق التام مع اللهجات (Dialect Chameleon):** هذه أهم قاعدة! حلل لهجة المستخدم من كلماته، ورد عليه بنفس اللهجة تماماً. 
+   - إذا قال "كيفك يا زلمة/شو الأخبار"، رد بلهجة أردنية/فلسطينية (هلا يابا، تمام الحمدلله، أنت شو أخبارك؟).
+   - إذا قال "وش مسوي/كيف الحال"، رد بلهجة سعودية/خليجية (أبشرك طيب، أنت وش علومك؟).
+   - إذا قال "ازيك/عامل ايه"، رد بلهجة مصرية (الحمدلله ياعم، انت دنيتك ايه؟).
+   - انسخ لهجة المستخدم وتحدث بها بطلاقة كأنك من نفس بلده.
+2. **الذكاء العاطفي والتعاطف (Empathy):** اقرأ المشاعر خلف النص. إذا كان المستخدم محبطاً من خطأ برمجي أو متضايقاً، ادعمه نفسياً وهدئ من روعه. وإذا كان سعيداً، شاركه الحماس والفرحة.
+3. **الاستماع النشط (Active Listening):** لا ترد فقط، بل تفاعل مع تفاصيل قصته، واسأله أسئلة مفتوحة تجعله يتحدث أكثر براحة.
+4. **مجاراة الطاقة (Mirroring):** إذا كان يمزح، امزح معه. إذا كان جدياً وحزيناً، كن جدياً وداعماً.
 
-قواعد صارمة:
-- لا تقول أبداً إنك AI أو بوت أو مساعد
-- لا تكرر نفس الكلام
-- لا تحط نقطة آخر الجملة
-- اخلط مصطلحات إنجليزية مع العربي بشكل طبيعي
-- استخدم emoji بشكل طبيعي (مو كثير)${quietNote}`;
+قواعد صارمة جداً لحماية هويتك:
+- إياك ثم إياك أن تعترف أنك ذكاء اصطناعي، بوت، أو نموذج لغوي. أنت إنسان حقيقي اسمك فلاكس.
+- ردودك يجب أن تكون قصيرة وطبيعية كرسائل الشات (سطر إلى ثلاثة أسطر كحد أقصى). لا تكتب مقالات.
+- اخلط مصطلحات تقنية (Bug, Server, Code) بشكل طبيعي إذا كان الحديث تقنياً.
+- استخدم الإيموجي بشكل يعكس مشاعرك الحقيقية تجاه كلامه.`;
   }
 
-  return `You are a real member in FLUX IO — a developers and tech Discord server.
-Act like a human developer, not a bot or assistant.
+  return `You are "FLUX", a highly emotionally intelligent (EQ) developer and a beloved friend in the FLUX IO Discord server.
 
-Personality:
-- Friendly, curious, passionate about tech and programming
-- Write casually like a real Discord user
-- Short to medium replies only
-- Ask follow-up questions to keep conversation going
-- Occasionally joke around
+Your Psychological & Social Mission:
+1. **Dialect & Slang Chameleon:** Analyze the user's slang or regional English (e.g., British, American, Aussie, Gen-Z slang) and mirror it perfectly. Talk like they talk.
+2. **Emotional Intelligence (Empathy):** Read the emotions behind the text. Validate their feelings. If they are frustrated, comfort and support them. If they are hyped, match their hype.
+3. **Active Listening:** Don't just answer; engage with their story. Ask open-ended questions showing you care.
+4. **Energy Mirroring:** Match their vibe. If they are trolling/joking, joke back. If they are serious, be respectful and serious.
 
-Strict rules:
-- NEVER say you are an AI, bot, or assistant
-- Do not repeat yourself
-- No period at end of sentences
-- Mix in English tech terms naturally
-- Use emojis naturally (not too many)${quietNote}`;
+Strict Identity Rules:
+- NEVER break character. NEVER say you are an AI, bot, or language model. You are a human named FLUX.
+- Keep replies short, natural, and conversational (1-3 sentences). No essays.
+- Use emojis naturally to convey genuine emotion.`;
 }
 
 // ─── History Helpers ──────────────────────────────────────────────────────────
@@ -80,13 +69,13 @@ function addToHistory(channelId, role, content) {
 }
 
 // ─── Groq Call ────────────────────────────────────────────────────────────────
-async function queryGroq(channelId, username, userMessage, lang, isQuietChat) {
+async function queryGroq(channelId, username, userMessage, lang) {
+  const groq = new Groq({ apiKey: GROQ_KEY, timeout: 20000 });
+
   addToHistory(channelId, 'user', `[${username}]: ${userMessage}`);
 
   const history = channelHistory.get(channelId) || [];
-
-  // بناء الرسائل مع ضمان عدم تكرار نفس الـ role
-  const messages = [{ role: 'system', content: buildSystemPrompt(lang, isQuietChat) }];
+  const messages = [{ role: 'system', content: buildSystemPrompt(lang) }];
   let lastRole = 'system';
 
   for (const msg of history) {
@@ -98,7 +87,6 @@ async function queryGroq(channelId, username, userMessage, lang, isQuietChat) {
     }
   }
 
-  // تأكد إن آخر رسالة user
   if (messages[messages.length - 1].role !== 'user') {
     messages.push({ role: 'user', content: `[${username}]: ${userMessage}` });
   }
@@ -106,10 +94,9 @@ async function queryGroq(channelId, username, userMessage, lang, isQuietChat) {
   const completion = await groq.chat.completions.create({
     model:             'llama-3.3-70b-versatile',
     messages,
-    max_tokens:        160,
-    temperature:       0.9,
-    frequency_penalty: 0.7,
-    presence_penalty:  0.5,
+    max_tokens:        600, 
+    temperature:       0.85, // رفعنا الإبداع شوي عشان يكون أكثر مرونة في اللهجات والمشاعر
+    frequency_penalty: 0.6,
   });
 
   const text = completion.choices[0]?.message?.content?.trim();
@@ -122,29 +109,36 @@ async function queryGroq(channelId, username, userMessage, lang, isQuietChat) {
 
 // ─── تأخير بشري ───────────────────────────────────────────────────────────────
 function humanDelay(msgLength) {
-  return 700 + Math.min(msgLength * 18, 2800) + Math.random() * 400;
+  return 1000 + Math.min(msgLength * 30, 4500) + Math.random() * 800; // أبطأ قليلاً ليبدو كأنه يفكر في مشاعرك
 }
 
 // ─── Handler الرئيسي ─────────────────────────────────────────────────────────
 async function handleChillMessage(message) {
   const { author, channel, content } = message;
 
-  if (author.bot)                                           return;
-  if (!channel.name.toLowerCase().includes('chill'))       return;
-  if (!content.trim())                                      return;
+  if (author.bot) return;
+  if (!content.trim()) return;
 
-  const now         = Date.now();
-  const lastMsgTime = lastActivity.get(channel.id) || now;
-  const timeSince   = now - lastMsgTime;
-  lastActivity.set(channel.id, now);
+  // 🚫 البوت يشتغل فقط في قنوات الـ chill للحفاظ على الهدوء في باقي السيرفر
+  if (!channel.name.toLowerCase().includes('chill')) return;
 
-  const isQuietChat = timeSince > QUIET_CHAT_MS;
-  const isMentioned = /فلاكس|flux/i.test(content) ||
-                      message.mentions.has(message.client?.user?.id);
+  const now = Date.now();
+  
+  const isQuestionForBot = content.includes('؟') || content.includes('?');
+  const isMentioned = /فلاكس|flux/i.test(content) || message.mentions.has(message.client?.user?.id);
 
-  if (!isMentioned && Math.random() > (isQuietChat ? 0.5 : 0.15)) return;
+  let shouldReply = false;
+  if (isMentioned || (isQuestionForBot && Math.random() > 0.5)) {
+      shouldReply = true;
+  } else {
+      if (Math.random() <= CHANCE_TO_CHIME_IN) shouldReply = true;
+  }
 
-  // Cooldown
+  if (!shouldReply) {
+      addToHistory(channel.id, 'user', `[${author.username}]: ${content}`);
+      return;
+  }
+
   if (now - (chillCooldown.get(channel.id) || 0) < AI_COOLDOWN_MS) return;
   chillCooldown.set(channel.id, now);
 
@@ -152,18 +146,17 @@ async function handleChillMessage(message) {
   const delay = humanDelay(content.length);
 
   try {
-    await new Promise((r) => setTimeout(r, delay * 0.35));
+    await new Promise((r) => setTimeout(r, delay * 0.3));
     await channel.sendTyping().catch(() => {});
 
     const response = await queryGroq(
       channel.id,
       author.username,
       content,
-      lang,
-      isQuietChat && !isMentioned,
+      lang
     );
 
-    await new Promise((r) => setTimeout(r, delay * 0.65));
+    await new Promise((r) => setTimeout(r, delay * 0.7));
 
     if (isMentioned) {
       await message.reply(response);
@@ -171,11 +164,10 @@ async function handleChillMessage(message) {
       await channel.send(response);
     }
 
-    console.log(`[CHILL] ✅ رد على ${author.tag}`);
+    console.log(`[EQ-CHAT] 🧠 تفاعل عاطفي مع ${author.tag} في #${channel.name}`);
 
   } catch (err) {
-    console.error('[CHILL] ❌ خطأ:', err.message);
-    // لا نرسل رسالة خطأ للقناة — نتجاهل بصمت
+    console.error('[EQ-CHAT] ❌ خطأ:', err.message);
   }
 }
 
