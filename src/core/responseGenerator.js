@@ -117,10 +117,10 @@ async function generate({ context, messageHistory, username, userMessage, imageU
         messages.push({ role: 'user', content: userMessage });
     }
 
-    // ── [التبديل التلقائي للموديل] ──
-    const modelToUse = (imageUrls && imageUrls.length > 0) 
-        ? 'llama-3.2-11b-vision-preview' // موديل الصور
-        : 'llama-3.3-70b-versatile';     // موديل النصوص السريع
+    // ── [التبديل التلقائي للموديل - تحديث 2026] ──
+const modelToUse = (imageUrls && imageUrls.length > 0) 
+    ? 'meta-llama/llama-4-scout-17b-16e-instruct' // الموديل الجديد المعتمد للرؤية
+    : 'llama-3.3-70b-versatile';               // موديل النصوص السريع
 
     try {
         const completion = await groq.chat.completions.create({
