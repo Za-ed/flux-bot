@@ -117,11 +117,13 @@ async function generate({ context, messageHistory, username, userMessage, imageU
         messages.push({ role: 'user', content: userMessage });
     }
 
-    // ── [التبديل التلقائي للموديل - تحديث 2026] ──
+   // ── داخل ملف core/responseGenerator.js ──
 const modelToUse = (imageUrls && imageUrls.length > 0) 
-    ? 'meta-llama/llama-4-scout-17b-16e-instruct' // الموديل الجديد المعتمد للرؤية
-    : 'llama-3.3-70b-versatile';               // موديل النصوص السريع
+    ? 'meta-llama/llama-4-scout-17b-16e-instruct' 
+    : 'llama-3.3-70b-versatile';
 
+// 🛑 حطه هون بالضبط:
+console.log("🛠️ محاولة الاتصال بالموديل (Generator):", modelToUse);
     try {
         const completion = await groq.chat.completions.create({
             model: modelToUse,
