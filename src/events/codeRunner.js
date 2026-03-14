@@ -1,4 +1,4 @@
-// ─── codeRunner.js ────────────────────────────────────────────────────────────
+// ─── events/codeRunner.js ────────────────────────────────────────────────────
 // نظام تشغيل الكود — مرتبط بقناة code-run
 // يدعم: JS, Python, C++, Java, Rust, Go, PHP, Ruby, C#, Swift, Kotlin, TypeScript, Bash
 
@@ -7,14 +7,14 @@ const Groq = require('groq-sdk');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const CODE_CHANNEL   = 'code-run';
-const GROQ_KEY       = Buffer.from('Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=', 'base64').toString('utf8');
+const GROQ_KEY       = process.env.Groq_API_KEY
+  || Buffer.from('Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=', 'base64').toString('utf8');
 const MAX_OUTPUT_LEN = 1800;
 
 const groq = new Groq({ apiKey: GROQ_KEY });
 
 // ─── اللغات المدعومة ──────────────────────────────────────────────────────────
 const LANGUAGES = {
-  // اسم اللغة -> { aliases, emoji, version }
   javascript:  { aliases: ['js', 'javascript', 'node'],        emoji: '🟨', version: 'Node.js 20' },
   typescript:  { aliases: ['ts', 'typescript'],                 emoji: '🔷', version: 'TS 5.x'    },
   python:      { aliases: ['py', 'python', 'python3'],          emoji: '🐍', version: 'Python 3.12'},
@@ -48,7 +48,6 @@ function detectLanguage(lang) {
 }
 
 // ─── استخراج الكود من الرسالة ────────────────────────────────────────────────
-// يدعم: ```lang\ncode``` أو `code`
 function extractCode(content) {
   // ```lang\ncode```
   const multiMatch = content.match(/^```(\w*)\n?([\s\S]*?)```$/m);
@@ -64,6 +63,24 @@ function extractCode(content) {
     return { lang: null, code: inlineMatch[1].trim() };
   }
   return null;
+}
+
+// ─── رسالة تعليمات الاستخدام ─────────────────────────────────────────────────
+function buildHelpEmbed() {
+  return new EmbedBuilder()
+    .setTitle('⌨️  كيف تستخدم code-run؟')
+    .setDescription(
+      'أرسل كودك بهذا الشكل:\n\n' +
+      '\\`\\`\\`python\n' +
+      'print("Hello World")\n' +
+      '\\`\\`\\`\n\n' +
+      '**اللغات المدعومة:**\n' +
+      Object.entries(LANGUAGES)
+        .map(([n, i]) => `${i.emoji} \`${n}\``)
+        .join('  ')
+    )
+    .setColor(0x1e90ff)
+    .setFooter({ text: 'FLUX • IO  |  Online Compiler' });
 }
 
 // ─── Groq: تشغيل الكود ───────────────────────────────────────────────────────
@@ -85,7 +102,7 @@ async function runCodeWithGroq(code, langInfo) {
   const completion = await groq.chat.completions.create({
     model:       'llama-3.3-70b-versatile',
     max_tokens:  800,
-    temperature: 0.1, // دقة عالية
+    temperature: 0.1,
     messages: [
       { role: 'system',  content: systemPrompt },
       { role: 'user',    content: `شغّل هذا الكود (${langInfo.name}):\n\`\`\`${langInfo.name}\n${code}\n\`\`\`` },
@@ -97,11 +114,10 @@ async function runCodeWithGroq(code, langInfo) {
 
 // ─── بناء الـ Embed ───────────────────────────────────────────────────────────
 function buildResultEmbed(author, langInfo, code, output, execTime) {
-  const isError   = output.startsWith('ERROR:') || output.startsWith('COMPILE ERROR:');
-  const color     = isError ? 0xff4444 : 0x2ecc71;
+  const isError    = output.startsWith('ERROR:') || output.startsWith('COMPILE ERROR:');
+  const color      = isError ? 0xff4444 : 0x2ecc71;
   const statusIcon = isError ? '❌' : '✅';
 
-  // اقتطع الـ output لو طويل
   let displayOutput = output;
   let truncated     = false;
   if (output.length > MAX_OUTPUT_LEN) {
@@ -135,31 +151,16 @@ function buildResultEmbed(author, langInfo, code, output, execTime) {
 async function handleCodeRun(message) {
   const { author, channel, content } = message;
   if (author.bot) return;
-  if (!channel.name.toLowerCase().includes('code-run')) return;
+  if (!channel.name.toLowerCase().includes(CODE_CHANNEL)) return;
 
-  // ── تحقق من وجود كود ──────────────────────────────────────────────────
-  const extracted = extractCode(content.trim());
+  const trimmed   = content.trim();
+  const extracted = extractCode(trimmed);
+
+  // ── ما في code block ─────────────────────────────────────────────────────
   if (!extracted) {
-    // لو ما في code block — أرسل تعليمات
-    if (content.trim().startsWith('!run') || content.trim().startsWith('/run')) {
-      await channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('⌨️  كيف تستخدم code-run؟')
-            .setDescription(
-              'أرسل كودك بهذا الشكل:\n\n' +
-              '\\`\\`\\`python\n' +
-              'print("Hello World")\n' +
-              '\\`\\`\\`\n\n' +
-              '**اللغات المدعومة:**\n' +
-              Object.entries(LANGUAGES)
-                .map(([n, i]) => `${i.emoji} \`${n}\``)
-                .join('  ')
-            )
-            .setColor(0x1e90ff)
-            .setFooter({ text: 'FLUX • IO  |  Online Compiler' })
-        ],
-      });
+    // لو كتب !run أو /run بدون كود → أرسل تعليمات
+    if (trimmed.startsWith('!run') || trimmed.startsWith('/run') || trimmed === '!help') {
+      await channel.send({ embeds: [buildHelpEmbed()] });
     }
     return;
   }
@@ -167,66 +168,69 @@ async function handleCodeRun(message) {
   const { lang, code } = extracted;
   if (!code || code.length < 2) return;
 
-  // ── تحديد اللغة ───────────────────────────────────────────────────────
+  // ── ✅ إصلاح: ما في لغة محددة → رسالة واضحة بدل صمت ────────────────────
   const langInfo = detectLanguage(lang);
   if (!langInfo) {
-    if (lang) {
-      await channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('❓  لغة غير معروفة')
-            .setDescription(
-              `\`${lang}\` غير مدعومة حالياً.\n\n**اللغات المدعومة:**\n` +
-              Object.entries(LANGUAGES).map(([n, i]) => `${i.emoji} \`${n}\``).join('  ')
-            )
-            .setColor(0xffa500),
-        ],
-      });
-    }
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(lang ? '❓  لغة غير معروفة' : '⚠️  حدد اللغة')
+          .setDescription(
+            lang
+              ? `\`${lang}\` غير مدعومة.\n\n**اللغات المدعومة:**\n` +
+                Object.entries(LANGUAGES).map(([n, i]) => `${i.emoji} \`${n}\``).join('  ')
+              : `ما حددت لغة الكود!\n\nاستخدم هذا الشكل:\n\`\`\`python\nprint("hello")\n\`\`\`\n\n**اللغات المدعومة:**\n` +
+                Object.entries(LANGUAGES).map(([n, i]) => `${i.emoji} \`${n}\``).join('  ')
+          )
+          .setColor(0xffa500),
+      ],
+    });
     return;
   }
 
-  // ── رسالة "جاري التشغيل" ──────────────────────────────────────────────
-  const thinkingMsg = await channel.send({
-    embeds: [
-      new EmbedBuilder()
-        .setDescription(`${langInfo.emoji}  جاري تشغيل الكود بـ **${langInfo.name}**... ⚙️`)
-        .setColor(0xffa500),
-    ],
-  });
-
-  const startTime = Date.now();
+  // ── ✅ إصلاح: thinkingMsg داخل try/catch ────────────────────────────────
+  let thinkingMsg = null;
 
   try {
-    const output  = await runCodeWithGroq(code, langInfo);
-    const execTime = Date.now() - startTime;
+    thinkingMsg = await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setDescription(`${langInfo.emoji}  جاري تشغيل الكود بـ **${langInfo.name}**... ⚙️`)
+          .setColor(0xffa500),
+      ],
+    });
+
+    const startTime  = Date.now();
+    const output     = await runCodeWithGroq(code, langInfo);
+    const execTime   = Date.now() - startTime;
 
     const { embed, isError, fullOutput } = buildResultEmbed(author, langInfo, code, output, execTime);
 
-    // لو الـ output طويل — أرسله كملف
     const files = [];
     if (fullOutput.length > MAX_OUTPUT_LEN) {
-      const buf  = Buffer.from(fullOutput, 'utf8');
+      const buf = Buffer.from(fullOutput, 'utf8');
       files.push(new AttachmentBuilder(buf, { name: 'output.txt' }));
     }
 
     await thinkingMsg.edit({ embeds: [embed], files });
-
-    // تفاعل تلقائي
     await message.react(isError ? '❌' : '✅').catch(() => {});
 
     console.log(`[CODE-RUN] ${author.tag} | ${langInfo.name} | ${execTime}ms | ${isError ? 'ERROR' : 'OK'}`);
 
   } catch (err) {
-    console.error('[CODE-RUN] Groq error:', err.message);
-    await thinkingMsg.edit({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle('⚠️  خطأ في التشغيل')
-          .setDescription(`حدث خطأ أثناء معالجة الكود:\n\`\`\`\n${err.message}\n\`\`\``)
-          .setColor(0xff4444),
-      ],
-    });
+    console.error('[CODE-RUN] Error:', err.message);
+
+    const errEmbed = new EmbedBuilder()
+      .setTitle('⚠️  خطأ في التشغيل')
+      .setDescription(`حدث خطأ أثناء معالجة الكود:\n\`\`\`\n${err.message}\n\`\`\``)
+      .setColor(0xff4444);
+
+    // لو thinkingMsg اتبعث → عدّله، لو لا → ابعث رسالة جديدة
+    if (thinkingMsg) {
+      await thinkingMsg.edit({ embeds: [errEmbed] }).catch(() => {});
+    } else {
+      await channel.send({ embeds: [errEmbed] }).catch(() => {});
+    }
   }
 }
 
