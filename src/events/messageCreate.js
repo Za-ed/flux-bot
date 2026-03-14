@@ -169,8 +169,7 @@ async function queryGroq(userId, userMessage, imageUrls = []) {
     }
 
     // التبديل الصارم
-    const modelToUse = (imageUrls && imageUrls.length > 0) ? 'llama-3.2-11b-vision-preview' : 'llama-3.3-70b-versatile';
-
+    const modelToUse = imageUrls.length > 0 ? 'meta-llama/llama-4-scout-17b-16e-instruct' : 'llama-3.3-70b-versatile';
     const completion = await client.chat.completions.create({
         model:       modelToUse,
         messages:    apiMessages,
