@@ -1,7 +1,4 @@
 // ─── events/messageCreate.js ─────────────────────────────────────────────────
-// ⚠️ chillChat.js أُزيل من هنا لأنه يعمل كـ event مستقل تلقائياً
-// ══════════════════════════════════════════════════════════════════════════════
-
 const { handleCodeRun }       = require('./codeRunner');
 const { handleGamingMessage } = require('./gamingCorner');
 const { trackMessage }        = require('../utils/dailyReport');
@@ -15,7 +12,7 @@ const GROQ_KEY = process.env.GROQ_KEY || Buffer.from(
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const ASK_FLUX_CHANNEL_NAME  = 'ask-flux';
-const CODE_RUN_CHANNEL_NAME  = 'code-run';   // ← مستثنى من anti-link
+const CODE_RUN_CHANNEL_NAME  = 'code-run';
 const STAFF_ROLE_NAME        = 'Staff';
 const SPAM_THRESHOLD         = 5;
 const SPAM_WINDOW_MS         = 3000;
@@ -33,7 +30,6 @@ const threadCooldowns     = new Map();
 const userThreads         = new Map();
 const threadTimers        = new Map();
 
-// ─── تنظيف دوري لمنع تسرب الذاكرة ───────────────────────────────────────────
 setInterval(() => {
     const now = Date.now();
     for (const [k, ts]   of askFluxCooldowns.entries()) if (now - ts   > CACHE_CLEANUP_MS)    askFluxCooldowns.delete(k);
@@ -41,7 +37,6 @@ setInterval(() => {
     for (const [k, data] of spamMap.entries())          if ((now - (data.timestamps.at(-1) ?? 0)) > SPAM_WINDOW_MS * 10) spamMap.delete(k);
 }, CACHE_CLEANUP_MS);
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function splitMessage(text, maxLength = 1900) {
     const chunks = [];
     let current  = '';
@@ -72,11 +67,11 @@ async function sendTempWarning(channel, content, deleteAfterMs = 5000) {
 }
 
 function detectLanguage(text) {
+    if (!text) return 'arabic';
     const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
     return arabicChars / text.length > 0.3 ? 'arabic' : 'english';
 }
 
-// ─── Thread Timer ─────────────────────────────────────────────────────────────
 function resetThreadTimer(thread, userId) {
     if (threadTimers.has(thread.id)) clearTimeout(threadTimers.get(thread.id));
     const timer = setTimeout(async () => {
@@ -89,12 +84,10 @@ function resetThreadTimer(thread, userId) {
         threadTimers.delete(thread.id);
         conversationHistory.delete(userId);
         threadCooldowns.delete(userId);
-        console.log(`[THREAD] Auto-deleted for user ${userId}`);
     }, THREAD_INACTIVITY_MS);
     threadTimers.set(thread.id, timer);
 }
 
-// ─── Thread Creator ───────────────────────────────────────────────────────────
 async function getOrCreateThread(message) {
     const { author, guild } = message;
 
@@ -123,53 +116,49 @@ async function getOrCreateThread(message) {
     await thread.send(
         `👋 **أهلاً ${author}!** هذا ثريدك الخاص مع **FLUX AI**.\n\n` +
         `> 💡 اسألني أي شيء — برمجة، معرفة عامة، محادثة عادية.\n` +
-        `> 🧹 \`!مسح\` لمسح تاريخ المحادثة.\n` +
-        `> 📊 \`!تاريخ\` لعرض عدد الرسائل الحالية.\n` +
+        `> 🖼️ **أرسل أي صورة (كود أو ميمز) وسأقوم بتحليلها فوراً!**\n` +
         `> ⏰ يُحذف الثريد تلقائياً بعد دقيقتين من عدم النشاط.`
     );
 
     return thread;
 }
 
-// ─── Groq Query ───────────────────────────────────────────────────────────────
-// ─── Groq Query (Vision Supported) ───────────────────────────────────────────────
+// ─── المولد الذكي (محمي من أخطاء الرؤية) ──────────────────────────────────────
 async function queryGroq(userId, userMessage, imageUrls = []) {
-    const client = new Groq({ apiKey: GROQ_KEY, timeout: 20000 });
+    const client = new Groq({ apiKey: GROQ_KEY, timeout: 30000 });
     const lang   = detectLanguage(userMessage || 'صورة');
-
-    const systemPrompt = lang === 'arabic'
-        ? `أنت FLUX Bot، مساعد ذكي واحترافي في سيرفر FLUX IO على Discord.
-قواعد:
-- رد بالعربية الفصحى السهلة دائماً
-- إذا أرسل المستخدم صورة، حللها بدقة (إذا كانت كود برمجي، اكتشف الأخطاء واشرحها).
-- استخدم code blocks مع اسم اللغة
-- لا تكرر السؤال في ردك
-- كن واضحاً، مفيداً، ودوداً، ومختصراً`
-        : `You are FLUX Bot, a smart assistant in FLUX IO Discord server.
-Rules:
-- Respond in English only
-- If there is an image, analyze it perfectly (explain code or images).
-- Use markdown code blocks with language names
-- Be clear, helpful, concise, friendly`;
 
     if (!conversationHistory.has(userId)) conversationHistory.set(userId, []);
     const history = conversationHistory.get(userId);
 
-    // تجهيز مصفوفة الرسائل للـ API
-    let apiMessages = [{ role: 'system', content: systemPrompt }, ...history];
+    let apiMessages = [];
 
     if (imageUrls && imageUrls.length > 0) {
+        // ── موديل الـ Vision ──
+        // موديل الرؤية يتجنب الذاكرة الطويلة لمنع الانهيار
+        const visionInstruction = lang === 'arabic'
+            ? "أنت مساعد ذكي ومبرمج محترف. اشرح هذا الكود أو الصورة بدقة وبلغة عربية. استخدم code blocks إذا كان هناك كود برمجي.\n\n"
+            : "You are a smart assistant. Explain this code/image perfectly.\n\n";
+
         const contentArray = [];
-        contentArray.push({ type: 'text', text: userMessage || 'اشرح لي محتوى هذه الصورة بدقة.' });
+        contentArray.push({ type: 'text', text: visionInstruction + (userMessage || 'اشرح لي محتوى هذه الصورة بدقة.') });
+
         for (const url of imageUrls) {
             contentArray.push({ type: 'image_url', image_url: { url: url } });
         }
         apiMessages.push({ role: 'user', content: contentArray });
     } else {
+        // ── الموديل النصي ──
+        const systemPrompt = lang === 'arabic'
+            ? `أنت FLUX Bot، مساعد ذكي في سيرفر FLUX IO. رد بعربية فصحى سهلة، استخدم code blocks للبرمجة، وكن مفيداً ومختصراً.`
+            : `You are FLUX Bot. Respond in English only. Use markdown for code blocks. Be clear and helpful.`;
+        
+        apiMessages.push({ role: 'system', content: systemPrompt });
+        apiMessages = apiMessages.concat(history);
         apiMessages.push({ role: 'user', content: userMessage });
     }
 
-    // التبديل التلقائي لموديل البصر
+    // التبديل الصارم: إذا في صورة استخدم موديل الرؤية، وإلا الموديل العادي
     const modelToUse = (imageUrls && imageUrls.length > 0) ? 'llama-3.2-11b-vision-preview' : 'llama-3.3-70b-versatile';
 
     const completion = await client.chat.completions.create({
@@ -182,14 +171,14 @@ Rules:
     const text = completion.choices[0]?.message?.content?.trim();
     if (!text) throw new Error('Empty response from Groq');
 
-    // حفظ النص فقط في الذاكرة لمنع الانهيار
-    history.push({ role: 'user', content: userMessage || '[تم إرسال صورة كود/ميمز]' });
+    // حفظ النص في الذاكرة لتكملة المحادثة
+    history.push({ role: 'user', content: userMessage || '[تم إرسال صورة]' });
     history.push({ role: 'assistant', content: text });
     if (history.length > MAX_HISTORY_LENGTH) history.splice(0, history.length - MAX_HISTORY_LENGTH);
 
     return text;
 }
-// ─── AI Response Handler ──────────────────────────────────────────────────────
+
 // ─── AI Response Handler ──────────────────────────────────────────────────────
 async function handleAIResponse(userId, question, targetChannel, originalMessage = null, imageUrls = []) {
     let typingInterval = null;
@@ -198,7 +187,6 @@ async function handleAIResponse(userId, question, targetChannel, originalMessage
         typingInterval = setInterval(() => targetChannel.sendTyping().catch(() => {}), 5000);
         if (originalMessage) await originalMessage.react('⏳').catch(() => {});
 
-        // تمرير الصور هنا
         const aiResponse = await queryGroq(userId, question, imageUrls);
 
         clearInterval(typingInterval); typingInterval = null;
@@ -215,13 +203,14 @@ async function handleAIResponse(userId, question, targetChannel, originalMessage
             await originalMessage.react('❌').catch(() => {});
         }
         let errMsg = '❌ عذراً، حدث خطأ. حاول مجدداً.';
-        if (err?.status === 429 || err?.message?.includes('rate'))          errMsg = '⏳ الخادم مشغول، انتظر ثوانٍ وحاول مجدداً.';
-        if (err?.message?.includes('timeout') || err?.code === 'ETIMEDOUT') errMsg = '⌛ انتهت مهلة الاتصال. حاول مجدداً.';
-        if (err?.status === 401)                                             errMsg = '🔑 خطأ في مفتاح Groq API. تواصل مع المسؤول.';
+        if (err?.status === 400 && imageUrls.length > 0) errMsg = '⚠️ حجم الصورة كبير أو التنسيق غير مدعوم، جرب صورة ثانية!';
+        else if (err?.status === 429)                    errMsg = '⏳ الخادم مشغول، انتظر ثوانٍ وحاول مجدداً.';
+        else if (err?.message?.includes('timeout'))      errMsg = '⌛ انتهت مهلة الاتصال. حاول مجدداً.';
         await targetChannel.send(errMsg).catch(() => {});
         console.error('[GROQ ERROR]', err?.status, err?.message);
     }
 }
+
 // ─── Anti-Spam ────────────────────────────────────────────────────────────────
 async function handleAntiSpam(message) {
     const { author, member, channel } = message;
@@ -243,7 +232,7 @@ async function handleAntiSpam(message) {
         try {
             await member.timeout(TIMEOUT_DURATION_MS, 'Auto spam detection');
             await sendTempWarning(channel, `🔇 **${author.username}** تم كتمه 5 دقائق بسبب السبام.`, 8000);
-        } catch (err) { console.error('[AUTOMOD] Timeout failed:', err.message); }
+        } catch (err) {}
         return true;
     }
     return false;
@@ -260,20 +249,15 @@ module.exports = {
 
         const { author, member, channel, content } = message;
 
-        // ── الوحدات الخارجية ──────────────────────────────────────────────────
-        // chillChat.js يعمل كـ event مستقل — لا تستدعيه هنا
         try {
             if (typeof handleCodeRun       === 'function') await handleCodeRun(message);
             if (typeof handleGamingMessage === 'function') await handleGamingMessage(message);
-        } catch (err) { console.error('[MODULE ERROR]', err.message); }
+        } catch (err) {}
 
-        // ── إحصاءات يومية ────────────────────────────────────────────────────
         try {
             if (typeof trackMessage === 'function') trackMessage(message.guild.id, author.id);
         } catch {}
 
-        // ── Anti-Link ─────────────────────────────────────────────────────────
-        // ✅ إصلاح: code-run مستثنى لأن الكود قد يحتوي على روابط
         const isCodeRunChannel = channel.name?.toLowerCase().includes(CODE_RUN_CHANNEL_NAME);
         if (/https?:\/\//i.test(content) && !isStaff(member) && !isCodeRunChannel) {
             try { await message.delete(); } catch {}
@@ -281,22 +265,23 @@ module.exports = {
             return;
         }
 
-        // ── Anti-Spam ─────────────────────────────────────────────────────────
         if (!isStaff(member) && await handleAntiSpam(message)) return;
 
+        // ─── استخراج الصور بطريقة قوية ومضمونة ───
+        const imageUrls = [];
+        message.attachments.forEach(att => {
+            if (att.url && (att.url.match(/\.(png|jpg|jpeg|gif|webp)/i) || (att.contentType && att.contentType.includes('image')))) {
+                imageUrls.push(att.url);
+            }
+        });
+
         // ════════════════════════════════════════════════════════════════════
-        // ── ثريد AI (رسائل داخل الثريد الخاص بالمستخدم) ──────────────────
-        // ════════════════════════════════════════════════════════════════════
-        // ════════════════════════════════════════════════════════════════════
-        // ── ثريد AI (رسائل داخل الثريد الخاص بالمستخدم) ──────────────────
+        // ── ثريد AI (داخل الثريد)
         // ════════════════════════════════════════════════════════════════════
         if (channel.isThread()) {
             if (userThreads.get(author.id) !== channel.id) return;
 
             const q = content.trim();
-            // التقاط الصور
-            const imageUrls = message.attachments.filter(a => a.contentType?.startsWith('image/')).map(a => a.url);
-
             if (!q && imageUrls.length === 0) return;
 
             if (q === '!clear' || q === '!مسح') {
@@ -326,18 +311,12 @@ module.exports = {
         }
 
         // ════════════════════════════════════════════════════════════════════
-        // ── قناة ask-flux ─────────────────────────────────────────────────
+        // ── قناة ask-flux (الرسالة الأولى لفتح الثريد)
         // ════════════════════════════════════════════════════════════════════
         if (channel.name?.toLowerCase().trim() !== ASK_FLUX_CHANNEL_NAME) return;
 
         const q = content.trim();
-        // التقاط الصور من المرفقات
-        const imageUrls = message.attachments.filter(a => a.contentType?.startsWith('image/')).map(a => a.url);
-
-        // تعديل الشرط: إذا ما في نص ولا صورة، تجاهل
         if (!q && imageUrls.length === 0) return;
-
-        console.log(`[ASK-FLUX] ${author.tag}: ${q.slice(0, 80) || '[صورة]'}`);
 
         const lastUsed = askFluxCooldowns.get(author.id) || 0;
         const now      = Date.now();
@@ -357,13 +336,8 @@ module.exports = {
             usingThread   = true;
             resetThreadTimer(thread, author.id);
             await message.react('💬').catch(() => {});
-            console.log(`[ASK-FLUX] Thread ready: ${thread.id}`);
-        } catch (threadErr) {
-            console.error('[ASK-FLUX] Thread creation failed:', threadErr.message);
-            await channel.send(`⚠️ ما قدرت أنشئ ثريد، سأرد هنا مباشرة ${author}.`).catch(() => {});
-        }
+        } catch (threadErr) {}
 
-        // تمرير الصور للـ AI
         await handleAIResponse(author.id, q, targetChannel, usingThread ? null : message, imageUrls);
     },
 };
