@@ -8,7 +8,6 @@ const Groq = require('groq-sdk');
 const CODE_CHANNEL   = 'code-run';
 const MAX_OUTPUT_LEN = 1800;
 
-// ✅ إصلاح: يدعم كل أسماء الـ env المحتملة
 const GROQ_KEY =
   process.env.Groq_API_KEY ||
   process.env.GROQ_KEY     ||
@@ -17,6 +16,9 @@ const GROQ_KEY =
     'Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=',
     'base64'
   ).toString('utf8');
+
+// ✅ منع معالجة نفس الرسالة مرتين (يُحل مشكلة الرسائل المتكررة)
+const processedMessages = new Set();
 
 // ─── اللغات المدعومة ──────────────────────────────────────────────────────────
 const LANGUAGES = {
@@ -52,10 +54,9 @@ function detectLanguage(lang) {
   return null;
 }
 
-// ─── استخراج الكود من الرسالة ────────────────────────────────────────────────
-// ✅ إصلاح: regex أقوى يتعامل مع \r\n و نهايات السطر المختلفة
+// ─── استخراج الكود ───────────────────────────────────────────────────────────
 function extractCode(content) {
-  // ``` lang \n code ``` — الصيغة الرئيسية
+  // ``` lang \n code ``` — يدعم \r\n و \n
   const multiMatch = content.match(/```(\w*)\r?\n([\s\S]*?)```/);
   if (multiMatch) {
     return {
@@ -71,7 +72,7 @@ function extractCode(content) {
   return null;
 }
 
-// ─── رسالة تعليمات الاستخدام ─────────────────────────────────────────────────
+// ─── رسالة التعليمات ─────────────────────────────────────────────────────────
 function buildHelpEmbed() {
   return new EmbedBuilder()
     .setTitle('⌨️  كيف تستخدم code-run؟')
@@ -89,7 +90,6 @@ function buildHelpEmbed() {
 
 // ─── Groq: تشغيل الكود ───────────────────────────────────────────────────────
 async function runCodeWithGroq(code, langInfo) {
-  // ✅ إصلاح: ننشئ الـ instance داخل الدالة — مو على مستوى الموديول
   const groq = new Groq({ apiKey: GROQ_KEY, timeout: 30000 });
 
   const completion = await groq.chat.completions.create({
@@ -99,17 +99,18 @@ async function runCodeWithGroq(code, langInfo) {
     messages: [
       {
         role:    'system',
-        content: `أنت محاكي بيئة تشغيل كود. مهمتك الوحيدة هي تشغيل الكود وإرجاع النتيجة.
-قواعد صارمة:
-1. شغّل الكود كأنك بيئة ${langInfo.name} (${langInfo.version})
-2. أرجع فقط output الكود أو رسالة الخطأ
-3. لو فيه خطأ: ERROR: [رسالة الخطأ مع رقم السطر]
-4. لو ما في output: (no output)
-5. لا شرح، لا تعليق، لا نص زيادة`
+        content:
+          `أنت محاكي بيئة تشغيل كود. مهمتك فقط تشغيل الكود وإرجاع النتيجة.\n` +
+          `قواعد:\n` +
+          `1. شغّل الكود كأنك بيئة ${langInfo.name} (${langInfo.version})\n` +
+          `2. أرجع فقط output الكود أو رسالة الخطأ\n` +
+          `3. لو فيه خطأ: ERROR: [رسالة الخطأ مع رقم السطر]\n` +
+          `4. لو ما في output: (no output)\n` +
+          `5. لا شرح، لا تعليق، لا نص زيادة أبداً`,
       },
       {
         role:    'user',
-        content: `شغّل:\n\`\`\`${langInfo.name}\n${code}\n\`\`\``
+        content: `شغّل:\n\`\`\`${langInfo.name}\n${code}\n\`\`\``,
       },
     ],
   });
@@ -152,17 +153,25 @@ function buildResultEmbed(author, langInfo, code, output, execTime) {
 
 // ─── Handler الرئيسي ─────────────────────────────────────────────────────────
 async function handleCodeRun(message) {
-  const { author, channel, content } = message;
+  const { author, channel, content, id: msgId } = message;
 
   if (author.bot) return;
   if (!channel.name.toLowerCase().includes(CODE_CHANNEL)) return;
 
-  const trimmed   = content.trim();
-  const extracted = extractCode(trimmed);
+  // ✅ منع المعالجة المزدوجة
+  if (processedMessages.has(msgId)) return;
+  processedMessages.add(msgId);
+  setTimeout(() => processedMessages.delete(msgId), 60000); // تنظيف بعد دقيقة
+
+  const trimmed = content.trim();
+
+  // ✅ إصلاح !help — case insensitive + startsWith بدل ===
+  const isHelpCmd = /^(!help|!run|\/run|!code)$/i.test(trimmed);
+  const extracted  = extractCode(trimmed);
 
   // ── ما في code block ──────────────────────────────────────────────────────
   if (!extracted) {
-    if (trimmed === '!help' || trimmed === '!run' || trimmed === '/run') {
+    if (isHelpCmd) {
       await channel.send({ embeds: [buildHelpEmbed()] });
     }
     return;
@@ -171,7 +180,7 @@ async function handleCodeRun(message) {
   const { lang, code } = extracted;
   if (!code || code.length < 2) return;
 
-  // ── ما في لغة أو لغة مجهولة ───────────────────────────────────────────────
+  // ── لغة غير محددة أو مجهولة ──────────────────────────────────────────────
   const langInfo = detectLanguage(lang);
   if (!langInfo) {
     await channel.send({
@@ -216,6 +225,7 @@ async function handleCodeRun(message) {
       files.push(new AttachmentBuilder(Buffer.from(output, 'utf8'), { name: 'output.txt' }));
     }
 
+    // ✅ edit فقط — بدون أي send ثاني
     await thinkingMsg.edit({ embeds: [embed], files });
     await message.react(isError ? '❌' : '✅').catch(() => {});
 
@@ -229,8 +239,12 @@ async function handleCodeRun(message) {
       .setDescription(`\`\`\`\n${err.message}\n\`\`\``)
       .setColor(0xff4444);
 
+    // ✅ لو thinkingMsg موجود → edit، لو لا → send
     if (thinkingMsg) {
-      await thinkingMsg.edit({ embeds: [errEmbed] }).catch(() => {});
+      await thinkingMsg.edit({ embeds: [errEmbed] }).catch(async () => {
+        // لو الـ edit فشل، لا تبعث رسالة جديدة — فقط log
+        console.error('[CODE-RUN] thinkingMsg.edit فشل');
+      });
     } else {
       await channel.send({ embeds: [errEmbed] }).catch(() => {});
     }
