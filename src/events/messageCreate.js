@@ -123,7 +123,7 @@ async function getOrCreateThread(message) {
     return thread;
 }
 
-// ─── المولد الذكي (محمي من أخطاء الرؤية) ──────────────────────────────────────
+// ─── المولد الذكي (محمي من أخطاء الرؤية مع دعم Base64) ─────────────────────────
 async function queryGroq(userId, userMessage, imageUrls = []) {
     const client = new Groq({ apiKey: GROQ_KEY, timeout: 30000 });
     const lang   = detectLanguage(userMessage || 'صورة');
@@ -135,7 +135,6 @@ async function queryGroq(userId, userMessage, imageUrls = []) {
 
     if (imageUrls && imageUrls.length > 0) {
         // ── موديل الـ Vision ──
-        // موديل الرؤية يتجنب الذاكرة الطويلة لمنع الانهيار
         const visionInstruction = lang === 'arabic'
             ? "أنت مساعد ذكي ومبرمج محترف. اشرح هذا الكود أو الصورة بدقة وبلغة عربية. استخدم code blocks إذا كان هناك كود برمجي.\n\n"
             : "You are a smart assistant. Explain this code/image perfectly.\n\n";
@@ -143,8 +142,19 @@ async function queryGroq(userId, userMessage, imageUrls = []) {
         const contentArray = [];
         contentArray.push({ type: 'text', text: visionInstruction + (userMessage || 'اشرح لي محتوى هذه الصورة بدقة.') });
 
+        // ⚠️ الحل السحري: تحميل الصورة وتحويلها لـ Base64 لتخطي حماية ديسكورد
         for (const url of imageUrls) {
-            contentArray.push({ type: 'image_url', image_url: { url: url } });
+            try {
+                const response = await fetch(url);
+                const arrayBuffer = await response.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
+                const mimeType = response.headers.get('content-type') || 'image/png';
+                const base64Image = `data:${mimeType};base64,${buffer.toString('base64')}`;
+                
+                contentArray.push({ type: 'image_url', image_url: { url: base64Image } });
+            } catch (error) {
+                console.error('[IMAGE FETCH ERROR]', error);
+            }
         }
         apiMessages.push({ role: 'user', content: contentArray });
     } else {
@@ -158,7 +168,7 @@ async function queryGroq(userId, userMessage, imageUrls = []) {
         apiMessages.push({ role: 'user', content: userMessage });
     }
 
-    // التبديل الصارم: إذا في صورة استخدم موديل الرؤية، وإلا الموديل العادي
+    // التبديل الصارم
     const modelToUse = (imageUrls && imageUrls.length > 0) ? 'llama-3.2-11b-vision-preview' : 'llama-3.3-70b-versatile';
 
     const completion = await client.chat.completions.create({
@@ -171,14 +181,12 @@ async function queryGroq(userId, userMessage, imageUrls = []) {
     const text = completion.choices[0]?.message?.content?.trim();
     if (!text) throw new Error('Empty response from Groq');
 
-    // حفظ النص في الذاكرة لتكملة المحادثة
     history.push({ role: 'user', content: userMessage || '[تم إرسال صورة]' });
     history.push({ role: 'assistant', content: text });
     if (history.length > MAX_HISTORY_LENGTH) history.splice(0, history.length - MAX_HISTORY_LENGTH);
 
     return text;
 }
-
 // ─── AI Response Handler ──────────────────────────────────────────────────────
 async function handleAIResponse(userId, question, targetChannel, originalMessage = null, imageUrls = []) {
     let typingInterval = null;

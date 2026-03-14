@@ -1,208 +1,192 @@
 // ─── events/chillChat.js ──────────────────────────────────────────────────────
-// الإصدار: 4.1 (النسخة المعرفية الذكية + وضع الإدارة المخفي)
-// المحرك: Groq API | النموذج: llama-3.3-70b-versatile
-// ══════════════════════════════════════════════════════════════════════════════
+const Groq = require('groq-sdk');
+const GROQ_KEY = process.env.Groq_API_KEY || Buffer.from('Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=', 'base64').toString('utf8');
 
-// ── إبقاء المفتاح كما طلبت دون أي تغيير ──
-const GROQ_KEY = process.env.Groq_API_KEY
-  || Buffer.from('Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=', 'base64').toString('utf8');
-
-// ── استيراد الطبقات الذكية ──
 const { analyze } = require('../layers/perceptionLayer');
 const { selectResponseStyle, getEvolutionDescription } = require('../layers/personalityEngine');
 const { analyzeChannelDynamics, computeParticipationProbability } = require('../layers/socialContext');
 const { shortTerm, mediumTerm, longTerm } = require('../memory/memorySystem');
 const learningEngine = require('../memory/learningEngine');
-const { generate } = require('../core/responseGenerator');
 
-// ── استيرادات نظام الإدارة (الجديدة) ──
 const { isAdmin, isFounder } = require('../utils/permissions');
 const { logAction } = require('../utils/modLog');
 const { addManualXP } = require('../utils/xpSystem');
 
-// ── ثوابت ──
 const CHILL_CHANNEL_KEYWORD = 'chill';
 const MENTION_COOLDOWN_MS   = 1000;
 const chillCooldown         = new Map();
 
-// ══════════════════════════════════════════════════════════════════════════════
-// المعالج الرئيسي للرسائل في قنوات السوالف + نظام الإدارة
-// ══════════════════════════════════════════════════════════════════════════════
 async function handleChillMessage(message) {
-  const { author, channel, content, member } = message;
+    const { author, channel, content, member, attachments, guild } = message;
 
-  // تجاهل البوتات والرسائل الفارغة
-  if (author.bot) return;
-  if (!content?.trim()) return;
+    if (author.bot) return;
 
-  const isChillChannel = channel.name?.toLowerCase().includes(CHILL_CHANNEL_KEYWORD);
-  const hasAdminRights = member ? (isAdmin(member) || isFounder(member)) : false;
-  const isMentioned    = /فلاكس|flux/i.test(content) || message.mentions?.has(message.client?.user?.id);
+    const q = content?.trim() || '';
 
-  // ── [نظام التواجد الذكي] ──
-  // إذا لم تكن القناة chill، نتجاهل الرسالة تماماً، إلا إذا كان إداري ونادى البوت
-  if (!isChillChannel) {
-    if (!hasAdminRights || !isMentioned) return;
-  }
-
-  const now = Date.now();
-
-  // ── 1. طبقة الإدراك (Perception) ──
-  const perception = analyze(content);
-
-  // ── 2. تحديث الذاكرة (Memory) ──
-  shortTerm.add(channel.id, {
-    role: 'user', content, username: author.username, userId: author.id,
-    emotion: perception.emotion, dialect: perception.dialect, intent: perception.intent
-  });
-
-  mediumTerm.recordMessage(channel.id, {
-    userId: author.id, username: author.username, emotion: perception.emotion,
-    topic: perception.topic, isHumorous: perception.isHumorous
-  });
-
-  const userProfile = longTerm.updateProfile(author.id, author.username, {
-    emotion: perception.emotion, topic: perception.topic,
-    dialect: perception.dialect, dialectConf: perception.dialectConf,
-    isHumorous: perception.isHumorous
-  });
-
-  longTerm.updateCommunity({
-    dialect: perception.dialect,
-    topic: perception.topic,
-    mood: perception.sentiment
-  });
-
-  // ── 3. السياق الاجتماعي وقرار التدخل (Social Context) ──
-  const recentMsgs   = shortTerm.getHistory(channel.id);
-  const channelState = mediumTerm.getChannelState(channel.id);
-  const dynamics     = analyzeChannelDynamics(recentMsgs, channelState);
-
-  const learnedProb = learningEngine.getRecommendedReplyProb(perception.emotion, perception.dialect);
-  const prob        = computeParticipationProbability(perception, dynamics, userProfile, learnedProb);
-  
-  // قرار الرد: في الإدارة خارج chill نرد دائماً، في chill نستخدم الاحتمالية العادية
-  let shouldReply = false;
-  if (isChillChannel) {
-      shouldReply = isMentioned || perception.warningFlag || (Math.random() <= prob);
-  } else {
-      shouldReply = true; // لأنه اجتاز شرط الأدمن والمنشن في الأعلى
-  }
-
-  if (!shouldReply) return;
-
-  // نظام تبريد بسيط لمنع السبام إذا تم عمل منشن متكرر
-  if (now - (chillCooldown.get(channel.id) || 0) < MENTION_COOLDOWN_MS) return;
-  chillCooldown.set(channel.id, now);
-
-  // ── 4. تحضير الشخصية وتوليد الرد (Personality & Generation) ──
-  try {
-    // إظهار حالة الكتابة لمحاكاة البشر
-    await channel.sendTyping().catch(() => {});
-
-    const personalityBias = learningEngine.getPersonalityBias();
-    const communityState  = longTerm.getCommunityState();
-    const responseStyle   = selectResponseStyle(perception, communityState, personalityBias, userProfile);
-    const evolutionDesc   = getEvolutionDescription(communityState.evolutionStage);
-
-    // تجهيز السياق لمولد الردود
-    const context = {
-      perception, 
-      responseStyle, 
-      dialectResult: { lang: perception.lang, dialect: perception.dialect },
-      userProfile, 
-      communityState, 
-      evolutionDesc,
-      hasAdminRights // إخبار العقل بأن المتحدث مدير لتفعيل وضع الأوامر
-    };
-
-    const messageHistory = shortTerm.buildAPIHistory(channel.id, 12); // جلب آخر 12 رسالة للسياق
-
-    // استدعاء Groq API عبر responseGenerator
-    let response = await generate({ 
-      context, 
-      messageHistory, 
-      username: author.username, 
-      userMessage: content 
+    // ─── استخراج الصور مع دعم Base64 لتخطي حماية ديسكورد ───
+    const imageUrls = [];
+    attachments.forEach(att => {
+        if (att.url && (att.url.match(/\.(png|jpg|jpeg|gif|webp)/i) || (att.contentType && att.contentType.includes('image')))) {
+            imageUrls.push(att.url);
+        }
     });
 
-    // ── [قراءة الأوامر الإدارية المخفية وتنفيذها] ──
-    if (hasAdminRights) {
-        // نبحث عن الأكواد مثل [CMD:KICK:123456789:سبب]
-        const cmdRegex = /\[CMD:([A-Z]+):([^:]+):?([^\]]*)\]/g;
-        let match;
-        while ((match = cmdRegex.exec(response)) !== null) {
-            const action = match[1];
-            const targetId = match[2].replace(/[<@!>]/g, ''); // تنظيف المنشن لاستخراج الـ ID النقي
-            const param = match[3];
+    if (!q && imageUrls.length === 0) return;
 
-            try {
-                const targetMember = await message.guild.members.fetch(targetId).catch(() => null);
-                
-                if (action === 'KICK' && targetMember) {
-                    await targetMember.kick(param || 'بأمر من الإدارة عبر FLUX الذكي');
-                    if (logAction) await logAction(message.guild, { type: 'kick', moderator: author, target: targetMember, reason: param || 'بأمر من الإدارة عبر FLUX الذكي' });
-                
-                } else if (action === 'ADDXP' && targetId) {
-                    const amount = parseInt(param) || 0;
-                    if (addManualXP) await addManualXP(message.guild.id, targetId, amount);
-                }
-            } catch (e) {
-                console.error('[ADMIN CMD ERROR]', e.message);
-            }
-        }
-        // إزالة الكود السري من الرسالة لكي لا يراه الأعضاء
-        response = response.replace(cmdRegex, '').trim();
+    const isChillChannel = channel.name?.toLowerCase().includes(CHILL_CHANNEL_KEYWORD);
+    const hasAdminRights = member ? (isAdmin(member) || isFounder(member)) : false;
+    const isMentioned    = /فلاكس|flux/i.test(q) || message.mentions?.has(message.client.user.id);
+
+    if (!isChillChannel) {
+        if (!hasAdminRights || !isMentioned) return;
     }
 
-    if (!response) response = "أبشر، تم التنفيذ!"; // حماية في حال كان الرد كله كود مخفي
+    const now = Date.now();
+    const perception = analyze(q || 'صورة');
 
-    // ── 5. إرسال الرد وتحديث محرك التعلم ──
-    let sentMessage;
-    // إذا كانت رسالة أدمن خارج الـ chill، الرد يكون reply مباشر
-    if (isMentioned || perception.warningFlag || !isChillChannel) {
-      sentMessage = await message.reply(response);
+    // ── 1. تحديث الذاكرة العميقة (نسختك الأصلية لحماية البوت من الانهيار) ──
+    shortTerm.add(channel.id, {
+        role: 'user', content: imageUrls.length > 0 ? `${q} [صورة]` : q, username: author.username, userId: author.id,
+        emotion: perception.emotion, dialect: perception.dialect, intent: perception.intent
+    });
+
+    mediumTerm.recordMessage(channel.id, {
+        userId: author.id, username: author.username, emotion: perception.emotion,
+        topic: perception.topic, isHumorous: perception.isHumorous
+    });
+
+    const userProfile = longTerm.updateProfile(author.id, author.username, {
+        emotion: perception.emotion, topic: perception.topic,
+        dialect: perception.dialect, dialectConf: perception.dialectConf,
+        isHumorous: perception.isHumorous
+    });
+
+    longTerm.updateCommunity({ dialect: perception.dialect, topic: perception.topic, mood: perception.sentiment });
+
+    const recentMsgs   = shortTerm.getHistory(channel.id);
+    const channelState = mediumTerm.getChannelState(channel.id);
+    const dynamics     = analyzeChannelDynamics(recentMsgs, channelState);
+
+    const learnedProb = learningEngine.getRecommendedReplyProb(perception.emotion, perception.dialect);
+    const prob        = computeParticipationProbability(perception, dynamics, userProfile, learnedProb);
+    
+    let shouldReply = false;
+    if (isChillChannel) {
+        shouldReply = isMentioned || perception.warningFlag || (Math.random() <= prob);
     } else {
-      sentMessage = await channel.send(response);
+        shouldReply = true;
     }
 
-    // حفظ رد البوت في الذاكرة
-    shortTerm.add(channel.id, { role: 'assistant', content: response });
-    mediumTerm.recordFluxResponse(channel.id, true);
+    if (!shouldReply) return;
 
-    // نتعلم فقط من التفاعل في قنوات السوالف، لتجنب تشويه شخصيته بسبب الأوامر الإدارية
-    if (sentMessage && isChillChannel) {
-        learningEngine.trackResponse(sentMessage.id, {
-            channelId: channel.id, userId: author.id, emotion: perception.emotion,
-            dialect: perception.dialect, intent: perception.intent,
-            style: responseStyle.style, topic: perception.topic
+    if (now - (chillCooldown.get(channel.id) || 0) < MENTION_COOLDOWN_MS) return;
+    chillCooldown.set(channel.id, now);
+
+    try {
+        await channel.sendTyping().catch(() => {});
+
+        const personalityBias = learningEngine.getPersonalityBias();
+        const communityState  = longTerm.getCommunityState();
+        const responseStyle   = selectResponseStyle(perception, communityState, personalityBias, userProfile);
+        const evolutionDesc   = getEvolutionDescription(communityState.evolutionStage);
+
+        // ── 2. المولد الذكي (مدمج داخلياً لضمان السرعة وعدم التعارض) ──
+        const client = new Groq({ apiKey: GROQ_KEY, timeout: 30000 });
+        let apiMessages = [];
+
+        const sysPrompt = `أنت FLUX Bot، مساعد ذكي ومرح في سيرفر FLUX IO.
+${evolutionDesc}
+تحدث بلهجة: ${perception.dialect}. مزاجك: ${perception.emotion}.
+أسلوبك: ${responseStyle.style}.
+أنت لست بوت، أنت إنسان حقيقي وصديق للأعضاء.
+${hasAdminRights ? 'أنت تتحدث مع الإدارة. لتنفيذ أمر استخدم [EXEC:kick:id:سبب] أو [EXEC:addxp:id:رقم].' : ''}`;
+
+        if (imageUrls.length > 0) {
+            const contentArray = [];
+            contentArray.push({ type: 'text', text: sysPrompt + '\nاشرح الصورة أو تفاعل معها:' + q });
+            
+            // تحويل الصور لـ Base64
+            for (const url of imageUrls) {
+                try {
+                    const response = await fetch(url);
+                    const arrayBuffer = await response.arrayBuffer();
+                    const buffer = Buffer.from(arrayBuffer);
+                    const mimeType = response.headers.get('content-type') || 'image/png';
+                    contentArray.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${buffer.toString('base64')}` } });
+                } catch (e) { console.error('Image Fetch Error:', e); }
+            }
+            apiMessages.push({ role: 'user', content: contentArray });
+        } else {
+            apiMessages.push({ role: 'system', content: sysPrompt });
+            apiMessages = apiMessages.concat(shortTerm.buildAPIHistory(channel.id, 10));
+            apiMessages.push({ role: 'user', content: q });
+        }
+
+        const modelToUse = imageUrls.length > 0 ? 'llama-3.2-11b-vision-preview' : 'llama-3.3-70b-versatile';
+
+        const completion = await client.chat.completions.create({
+            model: modelToUse,
+            messages: apiMessages,
+            max_tokens: 1500,
+            temperature: 0.7,
         });
-    }
 
-    console.log(
-      `[FLUX-AI] 🧠 ${author.tag} | ` +
-      `لهجة: ${perception.dialect} | أسلوب الرد: ${responseStyle.style} ` +
-      `${hasAdminRights && !isChillChannel ? '(رد إداري خاص)' : ''}`
-    );
+        let response = completion.choices[0]?.message?.content?.trim();
+        if (!response) response = "أبشر!";
 
-  } catch (err) {
-    console.error(`[FLUX-AI] ❌ خطأ أثناء توليد الرد: ${err.message}`);
-    if (isMentioned || perception.warningFlag || !isChillChannel) {
-      const fallbackMsg = perception.lang === 'arabic' 
-        ? 'معي مشكلة صغيرة بالاتصال هسة، بس أنا هنا وأسمعك 🙏' 
-        : 'Having a slight connection issue rn, but I got you 🙏';
-      await message.reply(fallbackMsg).catch(() => {});
+        // ── 3. معالجة الأوامر الإدارية ──
+        if (hasAdminRights) {
+            const execRegex = /\[EXEC:([a-z]+):([^:]+):?([^\]]*)\]/ig;
+            let match;
+            while ((match = execRegex.exec(response)) !== null) {
+                const action = match[1].toLowerCase();
+                const targetId = match[2].replace(/[<@!>]/g, '').trim();
+                const param = match[3];
+
+                try {
+                    const targetMember = await guild.members.fetch(targetId).catch(() => null);
+                    if (action === 'kick' && targetMember?.kickable) {
+                        await targetMember.kick(param || 'بأمر إداري');
+                        if (logAction) await logAction(guild, { type: 'kick', moderator: author, target: targetMember, reason: param });
+                    }
+                    else if (action === 'addxp') {
+                        if (addManualXP) await addManualXP(guild.id, targetId, parseInt(param) || 100);
+                    }
+                } catch (e) { console.error('[EXEC ERROR]', e.message); }
+            }
+            response = response.replace(execRegex, '').trim();
+        }
+
+        if (!response) response = "تم التنفيذ!";
+
+        let sentMessage;
+        if (isMentioned || !isChillChannel || perception.warningFlag) {
+            sentMessage = await message.reply(response);
+        } else {
+            sentMessage = await channel.send(response);
+        }
+
+        shortTerm.add(channel.id, { role: 'assistant', content: response });
+        mediumTerm.recordFluxResponse(channel.id, true);
+
+        if (sentMessage && isChillChannel) {
+            learningEngine.trackResponse(sentMessage.id, {
+                channelId: channel.id, userId: author.id, emotion: perception.emotion,
+                dialect: perception.dialect, intent: perception.intent,
+                style: responseStyle.style, topic: perception.topic
+            });
+        }
+
+    } catch (err) {
+        console.error(`[FLUX-AI] ❌ خطأ: ${err.message}`);
+        if (isMentioned || !isChillChannel) await message.reply('معي مشكلة صغيرة بالاتصال هسة، ثواني وبرجعلك 🙏').catch(()=>{});
     }
-  }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// التصدير
-// ══════════════════════════════════════════════════════════════════════════════
 module.exports = {
-  name: 'messageCreate',
-  once: false,
-  async execute(message, client) {
-    await handleChillMessage(message);
-  }
+    name: 'messageCreate',
+    once: false,
+    async execute(message, client) {
+        await handleChillMessage(message);
+    }
 };
