@@ -123,7 +123,7 @@ async function getOrCreateThread(message) {
     return thread;
 }
 
-// ─── المولد الذكي (محمي من أخطاء الرؤية مع دعم Base64) ─────────────────────────
+// ─── دالة queryGroq المُصححة ──────────────────────────────────────────────────
 async function queryGroq(userId, userMessage, imageUrls = []) {
     const client = new Groq({ apiKey: GROQ_KEY, timeout: 30000 });
     const lang   = detectLanguage(userMessage || 'صورة');
@@ -133,48 +133,35 @@ async function queryGroq(userId, userMessage, imageUrls = []) {
 
     let apiMessages = [];
 
+    // التبديل الصارم للموديل (تحديث 2026)
+    const modelToUse = (imageUrls && imageUrls.length > 0) 
+        ? 'meta-llama/llama-4-scout-17b-16e-instruct' 
+        : 'llama-3.3-70b-versatile';
+
+    console.log("🔍 [DEBUG] الموديل المطلوب في MessageCreate:", modelToUse);
+
     if (imageUrls && imageUrls.length > 0) {
-        // ── موديل الـ Vision ──
-        const visionInstruction = lang === 'arabic'
-            ? "أنت مساعد ذكي ومبرمج محترف. اشرح هذا الكود أو الصورة بدقة وبلغة عربية. استخدم code blocks إذا كان هناك كود برمجي.\n\n"
-            : "You are a smart assistant. Explain this code/image perfectly.\n\n";
-
         const contentArray = [];
-        contentArray.push({ type: 'text', text: visionInstruction + (userMessage || 'اشرح لي محتوى هذه الصورة بدقة.') });
+        contentArray.push({ type: 'text', text: (userMessage || 'اشرح لي محتوى هذه الصورة بدقة.') });
 
-        // ⚠️ الحل السحري: تحميل الصورة وتحويلها لـ Base64 لتخطي حماية ديسكورد
         for (const url of imageUrls) {
             try {
-                const response = await fetch(url);
-                const arrayBuffer = await response.arrayBuffer();
-                const buffer = Buffer.from(arrayBuffer);
-                const mimeType = response.headers.get('content-type') || 'image/png';
-                const base64Image = `data:${mimeType};base64,${buffer.toString('base64')}`;
-                
-                contentArray.push({ type: 'image_url', image_url: { url: base64Image } });
-            } catch (error) {
-                console.error('[IMAGE FETCH ERROR]', error);
-            }
+                const res = await fetch(url);
+                const buffer = Buffer.from(await res.arrayBuffer());
+                const mime = res.headers.get('content-type') || 'image/png';
+                contentArray.push({ type: 'image_url', image_url: { url: `data:${mime};base64,${buffer.toString('base64')}` } });
+            } catch (e) { console.error('[VISION FETCH ERROR]', e); }
         }
         apiMessages.push({ role: 'user', content: contentArray });
     } else {
-        // ── الموديل النصي ──
         const systemPrompt = lang === 'arabic'
-            ? `أنت FLUX Bot، مساعد ذكي في سيرفر FLUX IO. رد بعربية فصحى سهلة، استخدم code blocks للبرمجة، وكن مفيداً ومختصراً.`
-            : `You are FLUX Bot. Respond in English only. Use markdown for code blocks. Be clear and helpful.`;
+            ? `أنت FLUX Bot، مساعد ذكي في سيرفر FLUX IO. رد بعربية فصحى سهلة، استخدم code blocks للبرمجة.`
+            : `You are FLUX Bot. Respond in English only. Use markdown for code blocks.`;
         
         apiMessages.push({ role: 'system', content: systemPrompt });
         apiMessages = apiMessages.concat(history);
         apiMessages.push({ role: 'user', content: userMessage });
     }
-
-    // التبديل الصارم للموديل (تحديث 2026)
-const modelToUse = (imageUrls && imageUrls.length > 0) 
-    ? 'meta-llama/llama-4-scout-17b-16e-instruct' 
-    : 'llama-3.3-70b-versatile';
-
-// 🛑 حط هاد السطر هون عشان نشوف بالـ Terminal شو بصير
-console.log("🔍 [DEBUG] الموديل المطلوب في MessageCreate:", modelToUse);
 
     const completion = await client.chat.completions.create({
         model:       modelToUse,
@@ -186,12 +173,13 @@ console.log("🔍 [DEBUG] الموديل المطلوب في MessageCreate:", mo
     const text = completion.choices[0]?.message?.content?.trim();
     if (!text) throw new Error('Empty response from Groq');
 
-    history.push({ role: 'user', content: userMessage || '[تم إرسال صورة]' });
+    history.push({ role: 'user', content: userMessage || '[صورة]' });
     history.push({ role: 'assistant', content: text });
     if (history.length > MAX_HISTORY_LENGTH) history.splice(0, history.length - MAX_HISTORY_LENGTH);
 
     return text;
 }
+
 // ─── AI Response Handler ──────────────────────────────────────────────────────
 async function handleAIResponse(userId, question, targetChannel, originalMessage = null, imageUrls = []) {
     let typingInterval = null;
@@ -280,8 +268,8 @@ module.exports = {
 
         if (!isStaff(member) && await handleAntiSpam(message)) return;
 
-        // ─── استخراج الصور بطريقة قوية ومضمونة ───
-        const imageUrls = [];
+        // 1. استخراج الصور
+        let imageUrls = [];
         message.attachments.forEach(att => {
             if (att.url && (att.url.match(/\.(png|jpg|jpeg|gif|webp)/i) || (att.contentType && att.contentType.includes('image')))) {
                 imageUrls.push(att.url);
@@ -324,33 +312,35 @@ module.exports = {
         }
 
         // ════════════════════════════════════════════════════════════════════
-        // ── قناة ask-flux (الرسالة الأولى لفتح الثريد)
+        // ── قناة ask-flux
         // ════════════════════════════════════════════════════════════════════
-        if (channel.name?.toLowerCase().trim() !== ASK_FLUX_CHANNEL_NAME) return;
+        if (channel.name?.toLowerCase().trim() === ASK_FLUX_CHANNEL_NAME) {
+            const q = content.trim();
+            if (!q && imageUrls.length === 0) return;
 
-        const q = content.trim();
-        if (!q && imageUrls.length === 0) return;
+            const lastUsed = askFluxCooldowns.get(author.id) || 0;
+            const now = Date.now();
+            if (now - lastUsed < AI_COOLDOWN_MS) {
+                const rem = ((AI_COOLDOWN_MS - (now - lastUsed)) / 1000).toFixed(1);
+                await sendTempWarning(channel, `⏳ **${author.username}**، انتظر **${rem}** ثانية.`, 3000);
+                return;
+            }
+            askFluxCooldowns.set(author.id, now);
 
-        const lastUsed = askFluxCooldowns.get(author.id) || 0;
-        const now      = Date.now();
-        if (now - lastUsed < AI_COOLDOWN_MS) {
-            const rem = ((AI_COOLDOWN_MS - (now - lastUsed)) / 1000).toFixed(1);
-            await sendTempWarning(channel, `⏳ **${author.username}**، انتظر **${rem}** ثانية.`, 3000);
-            return;
+            let targetChannel = channel;
+            let usingThread = false;
+
+            try {
+                const thread = await getOrCreateThread(message);
+                targetChannel = thread;
+                usingThread = true;
+                resetThreadTimer(thread, author.id);
+                await message.react('💬').catch(() => {});
+            } catch (threadErr) {
+                console.error("خطأ في إنشاء الثريد:", threadErr.message);
+            }
+
+            await handleAIResponse(author.id, q, targetChannel, usingThread ? null : message, imageUrls);
         }
-        askFluxCooldowns.set(author.id, now);
-
-        let targetChannel = channel;
-        let usingThread   = false;
-
-        try {
-            const thread  = await getOrCreateThread(message);
-            targetChannel = thread;
-            usingThread   = true;
-            resetThreadTimer(thread, author.id);
-            await message.react('💬').catch(() => {});
-        } catch (threadErr) {}
-
-        await handleAIResponse(author.id, q, targetChannel, usingThread ? null : message, imageUrls);
     },
 };

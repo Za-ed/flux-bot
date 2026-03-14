@@ -16,13 +16,19 @@ const CHILL_CHANNEL_KEYWORD = 'chill';
 const MENTION_COOLDOWN_MS   = 1000;
 const chillCooldown         = new Map();
 
+// ── داخل ملف events/chillChat.js ─────────────────────────────────────────────
+
 async function handleChillMessage(message) {
     const { author, channel, content, member, attachments, guild } = message;
 
     if (author.bot) return;
 
-    const q = content?.trim() || '';
+    // 1. الحارس الصارم: إذا اسم القناة ما فيه كلمة chill، اخرج فوراً ولا تكمل
+    const isChillChannel = channel.name?.toLowerCase().includes(CHILL_CHANNEL_KEYWORD);
+    if (!isChillChannel) return; 
 
+    // هسا البوت ما رح يوصل لهون إلا إذا كان فعلاً في قناة Chill
+    const q = content?.trim() || '';
     // ─── استخراج الصور مع دعم Base64 لتخطي حماية ديسكورد ───
     const imageUrls = [];
     attachments.forEach(att => {
@@ -33,7 +39,7 @@ async function handleChillMessage(message) {
 
     if (!q && imageUrls.length === 0) return;
 
-    const isChillChannel = channel.name?.toLowerCase().includes(CHILL_CHANNEL_KEYWORD);
+     isChillChannel = channel.name?.toLowerCase().includes(CHILL_CHANNEL_KEYWORD);
     const hasAdminRights = member ? (isAdmin(member) || isFounder(member)) : false;
     const isMentioned    = /فلاكس|flux/i.test(q) || message.mentions?.has(message.client.user.id);
 
