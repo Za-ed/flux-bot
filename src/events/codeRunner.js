@@ -1,6 +1,9 @@
 // ─── events/codeRunner.js ────────────────────────────────────────────────────
 // نظام تشغيل الكود — قناة code-run
 
+// 1. استدعاء dotenv في أعلى الملف
+require('dotenv').config();
+
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const Groq = require('groq-sdk');
 
@@ -8,14 +11,8 @@ const Groq = require('groq-sdk');
 const CODE_CHANNEL   = 'code-run';
 const MAX_OUTPUT_LEN = 1800;
 
-const GROQ_KEY =
-  process.env.Groq_API_KEY ||
-  process.env.GROQ_KEY     ||
-  process.env.GROQ_API_KEY ||
-  Buffer.from(
-    'Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=',
-    'base64'
-  ).toString('utf8');
+// 2. قراءة المفتاح حصراً من ملف .env (تم حذف الكود القديم غير الآمن)
+const GROQ_KEY = process.env.Groq_API_KEY;
 
 // ✅ منع معالجة نفس الرسالة مرتين (يُحل مشكلة الرسائل المتكررة)
 const processedMessages = new Set();
@@ -90,6 +87,7 @@ function buildHelpEmbed() {
 
 // ─── Groq: تشغيل الكود ───────────────────────────────────────────────────────
 async function runCodeWithGroq(code, langInfo) {
+  // استخدام المتغير المخفي عند إنشاء عميل Groq
   const groq = new Groq({ apiKey: GROQ_KEY, timeout: 30000 });
 
   const completion = await groq.chat.completions.create({

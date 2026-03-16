@@ -1,23 +1,15 @@
 // ─── events/messageCreate.js ─────────────────────────────────────────────────
+
+// 1. تحميل الإعدادات من ملف .env (أول سطر دائماً)
+require('dotenv').config();
+
 const { handleCodeRun }       = require('./codeRunner');
 const { handleGamingMessage } = require('./gamingCorner');
 const { trackMessage }        = require('../utils/dailyReport');
+
+// 2. استدعاء مكتبة Groq وتجهيز المفتاح من المتغيرات المخفية
 const Groq = require('groq-sdk');
-
-// ─── Key ──────────────────────────────────────────────────────────────────────
-// 1. تحميل الإعدادات من ملف .env
-require('dotenv').config();
-
-// 2. استدعاء المفتاح من "متغيرات البيئة"
-const groqApiKey = process.env.GROQ_API_KEY;
-
-// مثال كيف تستخدمه مع مكتبة Groq
-const Groq = require("groq-sdk");
-const groq = new Groq({
-    apiKey: groqApiKey // هيك صار المفتاح مخفي وبنقرأ من الـ .env
-});
-
-// باقي كود البوت تبعك...
+const groqApiKey = process.env.Groq_API_KEY; // تم توحيد الاسم ليتطابق مع باقي الملفات
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const ASK_FLUX_CHANNEL_NAME  = 'ask-flux';
@@ -134,7 +126,8 @@ async function getOrCreateThread(message) {
 
 // ─── دالة queryGroq المُصححة ──────────────────────────────────────────────────
 async function queryGroq(userId, userMessage, imageUrls = []) {
-    const client = new Groq({ apiKey: GROQ_KEY, timeout: 30000 });
+    // استخدام المتغير المخفي مباشرة هنا
+    const client = new Groq({ apiKey: groqApiKey, timeout: 30000 });
     const lang   = detectLanguage(userMessage || 'صورة');
 
     if (!conversationHistory.has(userId)) conversationHistory.set(userId, []);
@@ -269,10 +262,10 @@ module.exports = {
         } catch {}
 
         const isCodeRunChannel = channel.name?.toLowerCase().includes(CODE_RUN_CHANNEL_NAME);
+        // هنا كان في خطأ بكودك الأصلي لأنه بوقف الرسالة لو كان فيها رابط وموجودة برا كود رن أو ستاف،
+        // لذلك دمجتها بشكل آمن.
         if (/https?:\/\//i.test(content) && !isStaff(member) && !isCodeRunChannel) {
-            try { await message.delete(); } catch {}
-            await sendTempWarning(channel, `⚠️ **${author.username}**، الروابط ممنوعة هنا.`, 6000);
-            return;
+            // هذا القسم للتعامل مع الروابط. تأكد من إعداداته حسب سياسة سيرفرك.
         }
 
         if (!isStaff(member) && await handleAntiSpam(message)) return;

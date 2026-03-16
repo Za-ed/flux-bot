@@ -1,3 +1,4 @@
+// 1. تحميل الإعدادات من ملف .env (لازم يكون أول سطر)
 require('dotenv').config();
 
 const fs   = require('fs');
@@ -14,7 +15,7 @@ initXP()
   .then(() => console.log('[XP] Database Connected Successfully'))
   .catch((err) => console.error('[XP] Init error:', err.message));
 
-// ─── Client ───────────────────────────────────────────────────────────────────
+// ─── إعداد بوت ديسكورد (Client) ──────────────────────────────────────────────
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -35,6 +36,7 @@ client.cooldowns = new Collection();
 const commandsPath = path.join(__dirname, 'commands');
 
 function loadCommands(dir) {
+  if (!fs.existsSync(dir)) return; // عشان ما يضرب الكود إذا المجلد مش موجود
   const items = fs.readdirSync(dir);
   for (const item of items) {
     const itemPath = path.join(dir, item);
@@ -55,23 +57,24 @@ function loadCommands(dir) {
 loadCommands(commandsPath);
 
 // ─── تحميل الأحداث ────────────────────────────────────────────────────────────
-// ⬇️ يحمل chillChat.js تلقائياً لأنه في مجلد events وعنده name و execute
 const eventsPath = path.join(__dirname, 'events');
-const eventFiles = fs.readdirSync(eventsPath).filter((f) => f.endsWith('.js'));
+if (fs.existsSync(eventsPath)) {
+    const eventFiles = fs.readdirSync(eventsPath).filter((f) => f.endsWith('.js'));
 
-for (const file of eventFiles) {
-  const event = require(path.join(eventsPath, file));
-  if (!event.name) continue;
+    for (const file of eventFiles) {
+      const event = require(path.join(eventsPath, file));
+      if (!event.name) continue;
 
-  if (event.once) {
-    client.once(event.name, (...args) => event.execute(...args, client));
-  } else {
-    client.on(event.name, (...args) => event.execute(...args, client));
-  }
-  console.log(`[EVENTS] Loaded: ${event.name} (${file})`);
+      if (event.once) {
+        client.once(event.name, (...args) => event.execute(...args, client));
+      } else {
+        client.on(event.name, (...args) => event.execute(...args, client));
+      }
+      console.log(`[EVENTS] Loaded: ${event.name} (${file})`);
+    }
 }
 
-// ─── Anti-Crash ───────────────────────────────────────────────────────────────
+// ─── Anti-Crash (منع توقف البوت عند الأخطاء) ───────────────────────────────────
 process.on('unhandledRejection', (reason) => {
   console.error('[ANTI-CRASH] Unhandled Rejection:', reason);
 });
@@ -79,7 +82,7 @@ process.on('uncaughtException', (err) => {
   console.error('[ANTI-CRASH] Uncaught Exception:', err);
 });
 
-// ─── Login ────────────────────────────────────────────────────────────────────
+// ─── Login (تشغيل البوت باستخدام التوكن المخفي) ────────────────────────────────
 client.login(process.env.DISCORD_TOKEN).catch((err) => {
   console.error('[FATAL] Failed to log in:', err.message);
   process.exit(1);
