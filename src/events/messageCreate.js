@@ -4,9 +4,10 @@
 require('dotenv').config();
 const Groq = require("groq-sdk");
 
-const { handleCodeRun }       = require('./codeRunner');
-const { handleGamingMessage } = require('./gamingCorner');
-const { trackMessage }        = require('../utils/dailyReport');
+const { handleCodeRun }         = require('./codeRunner');
+const { handleGamingMessage }   = require('./gamingCorner');
+const { trackMessage }          = require('../utils/dailyReport');
+const { handleImageGeneration } = require('../utils/imageGenerator'); // ✅ توليد الصور
 
 // 2. استدعاء مكتبة Groq وتجهيز المفتاح من المتغيرات المخفية
 // الكود رح يدور على المفتاح بالكابيتال، وإذا ما لقاه رح يدور بالسمول
@@ -258,8 +259,13 @@ module.exports = {
         const { author, member, channel, content } = message;
 
         try {
-            if (typeof handleCodeRun       === 'function') await handleCodeRun(message);
-            if (typeof handleGamingMessage === 'function') await handleGamingMessage(message);
+            if (typeof handleCodeRun         === 'function') await handleCodeRun(message);
+            if (typeof handleGamingMessage   === 'function') await handleGamingMessage(message);
+            // ✅ توليد الصور — إذا كانت رسالة لصورة تعالجها وترجع
+            if (typeof handleImageGeneration === 'function') {
+                const wasImage = await handleImageGeneration(message);
+                if (wasImage) return;
+            }
         } catch (err) {}
 
         try {

@@ -186,7 +186,7 @@ function canRate(user, member, data, guild) {
     if (!data) return false;
     const staffRole = getStaffRole(guild);
     const isStaff   = staffRole && member.roles.cache.has(staffRole.id);
-    return user.id === data.ownerId || isStaff;
+    return user.id === data.ownerId || isStaff || isAdmin(member);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -502,13 +502,14 @@ module.exports = {
                 const channelToClose = guild.channels.cache.get(channelId);
                 if (!channelToClose) return interaction.editReply({ content: '❌ القناة غير موجودة.' });
 
-                const staffRole = getStaffRole(guild);
-                const isStaff   = staffRole && member.roles.cache.has(staffRole.id);
-                const data      = ticketData.get(channelId);
-                const isOwner   = user.id === data?.ownerId;
+                const staffRole  = getStaffRole(guild);
+                const isStaff    = staffRole && member.roles.cache.has(staffRole.id);
+                const isAdminOrFounder = isAdmin(member); // ✅ Admin & Founder يقدرون يغلقون
+                const data       = ticketData.get(channelId);
+                const isOwner    = user.id === data?.ownerId;
 
-                if (!isStaff && !isOwner) {
-                    return interaction.editReply({ content: '❌ فقط الفريق أو صاحب التذكرة يقدر يغلقها.' });
+                if (!isStaff && !isOwner && !isAdminOrFounder) {
+                    return interaction.editReply({ content: '❌ فقط الفريق أو صاحب التذكرة أو الإدارة يقدر يغلقها.' });
                 }
 
                 if (data) {
