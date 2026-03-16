@@ -6,15 +6,15 @@ const {
     ButtonStyle,
     PermissionsBitField,
     ChannelType,
+    AttachmentBuilder,
 } = require('discord.js');
 
-const { handleSuggestVote }               = require('../utils/suggestVote');
-const { canUseCommand }                   = require('../utils/permManager');
+const { handleSuggestVote }                    = require('../utils/suggestVote');
+const { canUseCommand }                        = require('../utils/permManager');
 const { getUserData, getUserRank, xpForLevel } = require('../utils/xpSystem');
-const { generateRankCard }                = require('../utils/rankCard');
-const { AttachmentBuilder }               = require('discord.js');
-const { isAdmin }           = require('../utils/permissions');
-const { logAction }         = require('../utils/modLog');
+const { generateRankCard }                     = require('../utils/rankCard');
+const { isAdmin }                              = require('../utils/permissions');
+const { logAction }                            = require('../utils/modLog');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const TICKET_CATEGORY_NAME   = 'التذاكر';
@@ -204,9 +204,11 @@ module.exports = {
 
             let hasPermission = true;
             try {
-                hasPermission = canUseCommand(interaction.member, interaction.commandName);
+                // ✅ canUseCommand صارت async — لازم await
+                hasPermission = await canUseCommand(interaction.member, interaction.commandName);
             } catch (err) {
                 console.error('[PERM ERROR]', err.message);
+                hasPermission = true; // في حال فشل الاتصال بـ MongoDB نسمح بالتنفيذ
             }
 
             if (!hasPermission) {
