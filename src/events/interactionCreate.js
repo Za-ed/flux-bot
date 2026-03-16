@@ -10,6 +10,8 @@ const {
 
 const { handleSuggestVote } = require('../utils/suggestVote');
 const { canUseCommand }     = require('../utils/permManager');
+const { isAdmin }           = require('../utils/permissions');
+const { logAction }         = require('../utils/modLog');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const TICKET_CATEGORY_NAME   = 'التذاكر';
@@ -284,6 +286,112 @@ module.exports = {
                 if (await handleSuggestVote(interaction)) return;
             } catch (err) {
                 console.error('[SUGGEST VOTE ERROR]', err.message);
+            }
+
+            // ── موافقة / رفض طلبات الحظر (Moderator → Admin) ──────────────────
+            if (customId.startsWith('approve_ban_') || customId.startsWith('reject_ban_')) {
+                await interaction.deferReply({ flags: 64 });
+
+                // فقط الإدارة تقدر توافق
+                if (!isAdmin(member)) {
+                    return interaction.editReply({ content: '❌ هذه الأزرار للإدارة فقط.' });
+                }
+
+                const isApprove = customId.startsWith('approve_ban_');
+                const requestId = customId.replace('approve_ban_', '').replace('reject_ban_', '');
+
+                // استيراد pendingBans من ملف ban.js
+                let pendingBans;
+                try {
+                    pendingBans = require('../commands/ban').pendingBans;
+                } catch (e) {
+                    return interaction.editReply({ content: '❌ تعذّر الوصول لقائمة طلبات الحظر.' });
+                }
+
+                const data = pendingBans.get(requestId);
+
+                if (!data) {
+                    return interaction.editReply({ content: '⏰ انتهت صلاحية هذا الطلب (10 دقائق).' });
+                }
+
+                pendingBans.delete(requestId);
+
+                if (!isApprove) {
+                    // ── رفض الطلب ──────────────────────────────────────────────
+                    const rejectEmbed = new EmbedBuilder()
+                        .setTitle('❌  تم رفض طلب الحظر')
+                        .addFields(
+                            { name: '👤  العضو',       value: data.targetTag,    inline: true },
+                            { name: '🛡️  طلب بواسطة', value: data.requesterTag, inline: true },
+                            { name: '❌  رُفض بواسطة', value: user.tag,          inline: true },
+                        )
+                        .setColor(0xffa500)
+                        .setFooter({ text: 'FLUX • IO  |  نظام الموافقات' })
+                        .setTimestamp();
+
+                    await interaction.editReply({ embeds: [rejectEmbed] });
+                    console.log(`[BAN] ❌ Rejected: ${data.targetTag} | by ${user.tag}`);
+                    return;
+                }
+
+                // ── تنفيذ الحظر ────────────────────────────────────────────────
+                try {
+                    const targetMember = await guild.members.fetch(data.targetId).catch(() => null);
+
+                    if (!targetMember) {
+                        return interaction.editReply({ content: '❌ العضو غادر السيرفر قبل تنفيذ الحظر.' });
+                    }
+
+                    if (!targetMember.bannable) {
+                        return interaction.editReply({ content: '❌ لا أملك صلاحية حظر هذا العضو.' });
+                    }
+
+                    // DM للعضو قبل الحظر
+                    const dmEmbed = new EmbedBuilder()
+                        .setTitle('🔨  تم حظرك')
+                        .setDescription(`تم حظرك من **${guild.name}**`)
+                        .addFields(
+                            { name: 'السبب',  value: data.reason },
+                            { name: 'المشرف', value: `${data.requesterTag} (وافقت عليه الإدارة: ${user.tag})` }
+                        )
+                        .setColor(0x8b0000)
+                        .setTimestamp();
+                    await targetMember.send({ embeds: [dmEmbed] }).catch(() => {});
+
+                    await targetMember.ban({
+                        deleteMessageDays: data.days ?? 0,
+                        reason: `${data.reason} | طُلب بواسطة: ${data.requesterTag} | وافق: ${user.tag}`,
+                    });
+
+                    await logAction(guild, {
+                        type:      'ban',
+                        moderator: user,
+                        target:    targetMember,
+                        reason:    `${data.reason} (طُلب بواسطة ${data.requesterTag})`,
+                    }).catch(() => {});
+
+                    const approveEmbed = new EmbedBuilder()
+                        .setTitle('🔨  تم تنفيذ الحظر')
+                        .addFields(
+                            { name: '👤  العضو',        value: data.targetTag,    inline: true },
+                            { name: '🛡️  طلب بواسطة',  value: data.requesterTag, inline: true },
+                            { name: '✅  وافق عليه',    value: user.tag,          inline: true },
+                            { name: '📝  السبب',        value: data.reason },
+                            { name: '🗑️  حذف الرسائل', value: `${data.days ?? 0} يوم` },
+                        )
+                        .setColor(0x8b0000)
+                        .setThumbnail(targetMember.user.displayAvatarURL({ dynamic: true }))
+                        .setFooter({ text: 'FLUX • IO  |  نظام الإدارة' })
+                        .setTimestamp();
+
+                    await interaction.editReply({ embeds: [approveEmbed] });
+                    console.log(`[BAN] ✅ Approved: ${data.targetTag} | req: ${data.requesterTag} | approved: ${user.tag}`);
+
+                } catch (err) {
+                    console.error('[BAN APPROVE ERROR]', err.message);
+                    await interaction.editReply({ content: `❌ فشل تنفيذ الحظر: \`${err.message}\`` });
+                }
+                return;
             }
 
             // ── إغلاق التذكرة ──────────────────────────────────────────────────

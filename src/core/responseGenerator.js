@@ -1,6 +1,12 @@
 // ─── core/responseGenerator.js ───────────────────────────────────────────────
 const Groq = require('groq-sdk');
-const groq = new Groq({ apiKey: process.env.GROQ_KEY || Buffer.from('Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=', 'base64').toString('utf8') });
+// ─── التحقق من وجود المفتاح عند الاستيراد (يوقف البوت مبكراً بدل crash مجهول) ──
+const _GROQ_KEY = process.env.GROQ_KEY || process.env.GROQ_API_KEY;
+if (!_GROQ_KEY) {
+    console.error('[FATAL] responseGenerator: GROQ_KEY غير موجود في .env — البوت لن يعمل بدونه!');
+    // لا نوقف البوت هنا لأن الملف قد يُستورد في بيئة اختبار — فقط نسجّل الخطأ
+}
+const groq = new Groq({ apiKey: _GROQ_KEY, timeout: 45000 });
 
 // ── قواميس اللهجات والمشاعر (اختصرتها لك بناءً على نظامك) ──
 const DIALECT_STYLE = {

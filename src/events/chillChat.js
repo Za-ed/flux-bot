@@ -5,7 +5,7 @@ const Groq = require("groq-sdk");
 
 const { analyze } = require('../layers/perceptionLayer');
 const { selectResponseStyle, getEvolutionDescription } = require('../layers/personalityEngine');
-const { analyzeChannelDynamics, computeParticipationProbability } = require('../layers/socialContext');
+const { analyzeChannelDynamics, computeParticipationProbability, buildCrisisResponse } = require('../layers/socialContext');
 const { shortTerm, mediumTerm, longTerm } = require('../memory/memorySystem');
 const learningEngine = require('../memory/learningEngine');
 
@@ -92,6 +92,39 @@ async function handleChillMessage(message) {
     }
 
     if (!shouldReply) return;
+
+    // ─── اعتراض حرج: حالة خطر نفسي — لا نرسل AI أبداً ──────────────────────
+    if (perception.warningFlag) {
+        const crisisMsg = buildCrisisResponse(perception.lang);
+        try {
+            await message.reply(crisisMsg);
+            // تسجيل في الـ mod-log لإعلام الإدارة
+            const { guild } = message;
+            const logChannel = guild.channels.cache.find(
+                c => c.name.toLowerCase().includes('log') && c.isTextBased()
+            );
+            if (logChannel) {
+                const { EmbedBuilder } = require('discord.js');
+                const alertEmbed = new EmbedBuilder()
+                    .setTitle('🚨  تنبيه: إشارة خطر نفسي')
+                    .setDescription(
+                        `العضو ${message.author} أرسل رسالة تحتوي على إشارات خطر.
+
+` +
+                        `**القناة:** ${channel}
+` +
+                        `**الرسالة:** ||${q.slice(0, 200)}||`
+                    )
+                    .setColor(0xff0000)
+                    .setFooter({ text: 'FLUX • IO  |  نظام الأمان النفسي' })
+                    .setTimestamp();
+                await logChannel.send({ embeds: [alertEmbed] }).catch(() => {});
+            }
+        } catch (e) {
+            console.error('[CRISIS] فشل إرسال رسالة الأزمة:', e.message);
+        }
+        return; // لا تكمل للـ AI أبداً
+    }
 
     if (now - (chillCooldown.get(channel.id) || 0) < MENTION_COOLDOWN_MS) return;
     chillCooldown.set(channel.id, now);

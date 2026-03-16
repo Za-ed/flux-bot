@@ -1,55 +1,77 @@
+// ─── commands/leaderboard.js ──────────────────────────────────────────────────
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const leveling = require('../events/leveling');
+const { getLeaderboard, xpForLevel } = require('../utils/xpSystem'); // ✅ من xpSystem مباشرة
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('leaderboard')
-    .setDescription('عرض أعلى 10 أعضاء في المستويات.'),
+    data: new SlashCommandBuilder()
+        .setName('leaderboard')
+        .setDescription('عرض أعلى 10 أعضاء في المستويات.'),
 
-  async execute(interaction) {
-    await interaction.deferReply();
+    async execute(interaction) {
+        await interaction.deferReply();
 
-    const lb = leveling.getLeaderboard(interaction.guild.id, 10);
+        // ── جلب البيانات من MongoDB ────────────────────────────────────────
+        const lb = await getLeaderboard(interaction.guild.id, 10);
 
-    if (lb.length === 0) {
-      return interaction.editReply({ content: '❌ لا يوجد بيانات بعد. ابدأوا بالكلام! 💬' });
-    }
+        if (!lb || lb.length === 0) {
+            return interaction.editReply({
+                content: '❌ لا يوجد بيانات بعد. ابدأوا بالكلام! 💬',
+            });
+        }
 
-    const medals = ['🥇', '🥈', '🥉'];
+        const medals = ['🥇', '🥈', '🥉'];
 
-    // ✅ fetch الأعضاء مرة وحدة دفعة بدل 10 requests منفصلة
-    const memberIds = lb.map((e) => e.userId);
-    const fetchedMembers = new Map();
-    await Promise.allSettled(
-      memberIds.map((id) =>
-        interaction.guild.members.fetch(id)
-          .then((m) => fetchedMembers.set(id, m.user.username))
-          .catch(() => fetchedMembers.set(id, null))
-      )
-    );
+        // ── جلب أسماء الأعضاء دفعة واحدة ─────────────────────────────────
+        const memberIds     = lb.map((e) => e.user_id);
+        const fetchedNames  = new Map();
 
-    const lines = lb.map((entry, i) => {
-      const username = fetchedMembers.get(entry.userId) ?? `<@${entry.userId}>`;
-      const prefix   = medals[i] ?? `**${i + 1}.**`;
-      const xpBar    = buildMiniBar(entry.xp);
-      return `${prefix} **${username}** — المستوى **${entry.level}** • ${entry.xp} XP ${xpBar}`;
-    });
+        await Promise.allSettled(
+            memberIds.map((id) =>
+                interaction.guild.members.fetch(id)
+                    .then((m) => fetchedNames.set(id, m.displayName || m.user.username))
+                    .catch(() => fetchedNames.set(id, null))
+            )
+        );
 
-    const embed = new EmbedBuilder()
-      .setTitle('🏆  لوحة المتصدرين')
-      .setDescription(lines.join('\n'))
-      .setColor(0xf1c40f)
-      .setThumbnail(interaction.guild.iconURL({ dynamic: true }))
-      .setFooter({ text: `FLUX • IO  |  نظام المستويات • ${lb.length} أعضاء` })
-      .setTimestamp();
+        // ── بناء الأسطر ────────────────────────────────────────────────────
+        const lines = lb.map((entry, i) => {
+            const name      = fetchedNames.get(entry.user_id) ?? `<@${entry.user_id}>`;
+            const prefix    = medals[i] ?? `**${i + 1}.**`;
+            const level     = entry.level     ?? 0;
+            const totalXP   = entry.total_xp  ?? 0;
+            const currentXP = entry.xp        ?? 0;
+            const xpNeeded  = xpForLevel(level + 1);
 
-    await interaction.editReply({ embeds: [embed] });
-  },
+            // شريط XP مصغر
+            const bar = buildProgressBar(currentXP, xpNeeded, 8);
+
+            return (
+                `${prefix} **${name}**\n` +
+                `> ⭐ المستوى **${level}** • ${bar} • ${currentXP}/${xpNeeded} XP\n` +
+                `> 📊 المجموع الكلي: **${totalXP.toLocaleString()}** XP`
+            );
+        });
+
+        // ── بناء الـ Embed ─────────────────────────────────────────────────
+        const embed = new EmbedBuilder()
+            .setTitle('🏆  لوحة المتصدرين — FLUX IO')
+            .setDescription(lines.join('\n\n'))
+            .setColor(0xf1c40f)
+            .setThumbnail(interaction.guild.iconURL({ dynamic: true }))
+            .setFooter({
+                text: `FLUX • IO  |  نظام المستويات • ${lb.length} أعضاء`,
+                iconURL: interaction.client.user.displayAvatarURL(),
+            })
+            .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
+    },
 };
 
-// مساعد صغير — شريط XP مصغر
-function buildMiniBar(xp) {
-  const bars  = Math.min(Math.floor(xp / 500), 10);
-  const empty = 10 - bars;
-  return `\`${'█'.repeat(bars)}${'░'.repeat(empty)}\``;
+// ─── Helper: شريط تقدم مصغر ──────────────────────────────────────────────────
+function buildProgressBar(current, max, size = 8) {
+    if (max <= 0) return '`░░░░░░░░`';
+    const filled = Math.round((current / max) * size);
+    const empty  = size - filled;
+    return `\`${'█'.repeat(Math.max(0, filled))}${'░'.repeat(Math.max(0, empty))}\``;
 }
