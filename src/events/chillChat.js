@@ -1,6 +1,17 @@
 // ─── events/chillChat.js ──────────────────────────────────────────────────────
-const Groq = require('groq-sdk');
-const GROQ_KEY = process.env.Groq_API_KEY || Buffer.from('Z3NrXzEyT0U4V2ZaQ2tkbnF1V0Nlc3l3V0dkeWIzRlljdUJ4d28zeFFqdGNDdlJqTkR6U3RpRW8=', 'base64').toString('utf8');
+// 1. تحميل الإعدادات من ملف .env
+require('dotenv').config();
+
+// 2. استدعاء المفتاح من "متغيرات البيئة"
+const groqApiKey = process.env.GROQ_API_KEY;
+
+// مثال كيف تستخدمه مع مكتبة Groq
+const Groq = require("groq-sdk");
+const groq = new Groq({
+    apiKey: groqApiKey // هيك صار المفتاح مخفي وبنقرأ من الـ .env
+});
+
+// باقي كود البوت تبعك...
 
 const { analyze } = require('../layers/perceptionLayer');
 const { selectResponseStyle, getEvolutionDescription } = require('../layers/personalityEngine');
