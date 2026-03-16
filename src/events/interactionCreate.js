@@ -202,13 +202,13 @@ module.exports = {
             const command = client.commands.get(interaction.commandName);
             if (!command) return;
 
+            // ✅ canUseCommand sync — فوري من الـ Cache لا يبطئ الـ interaction
             let hasPermission = true;
             try {
-                // ✅ canUseCommand صارت async — لازم await
-                hasPermission = await canUseCommand(interaction.member, interaction.commandName);
+                hasPermission = canUseCommand(interaction.member, interaction.commandName);
             } catch (err) {
                 console.error('[PERM ERROR]', err.message);
-                hasPermission = true; // في حال فشل الاتصال بـ MongoDB نسمح بالتنفيذ
+                hasPermission = true;
             }
 
             if (!hasPermission) {
