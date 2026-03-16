@@ -43,6 +43,48 @@ const TICKET_TYPES = {
 // ─── Store: بيانات التذاكر المفتوحة ──────────────────────────────────────────
 const ticketData = new Map();
 
+// ── استرجاع التذاكر المفتوحة عند restart ─────────────────────────────────────
+// يُستدعى من ready.js أو عند أول interaction
+async function restoreTickets(guild) {
+    if (!guild) return;
+    try {
+        const category = guild.channels.cache.find(
+            c => c.type === 4 && c.name === TICKET_CATEGORY_NAME
+        );
+        if (!category) return;
+
+        const ticketChannels = guild.channels.cache.filter(
+            c => c.parentId === category.id && c.type === 0
+        );
+
+        for (const [, ch] of ticketChannels) {
+            if (!ticketData.has(ch.id)) {
+                // استرجاع من topic القناة
+                const topic = ch.topic ?? '';
+                const ownerMatch = topic.match(/(\d{17,20})/);
+                const typeMatch  = Object.keys(TICKET_TYPES).find(t =>
+                    ch.name.includes(TICKET_TYPES[t].label)
+                );
+                ticketData.set(ch.id, {
+                    ownerId:     ownerMatch?.[1] ?? null,
+                    ownerTag:    topic.split(' | ')[0].replace('تذكرة بواسطة ', '') ?? 'غير معروف',
+                    type:        typeMatch ?? 'ticket_support',
+                    openedAt:    ch.createdTimestamp,
+                    solved:      null,
+                    stars:       null,
+                    closedBy:    null,
+                    closedByTag: null,
+                    timeoutId:   null,
+                });
+            }
+        }
+        if (ticketChannels.size > 0)
+            console.log(`[TICKETS] ✅ استُرجعت ${ticketChannels.size} تذكرة مفتوحة`);
+    } catch (err) {
+        console.error('[TICKETS] فشل استرجاع التذاكر:', err.message);
+    }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function getLogChannel(guild) {
     return guild.channels.cache.find(
@@ -147,6 +189,7 @@ function canRate(user, member, data, guild) {
 // ═════════════════════════════════════════════════════════════════════════════
 module.exports = {
     name: 'interactionCreate',
+    restoreTickets,
     once: false,
 
     async execute(interaction, client) {

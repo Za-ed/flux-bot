@@ -2,6 +2,9 @@
 // نظام الذاكرة متعدد المستويات: قصيرة، متوسطة، طويلة المدى
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ⚠️  ملاحظة: ShortTermMemory و MediumTermMemory تعيش في RAM فقط (طبيعي — مقصود)
+// LongTermMemory تحفظ في flux_data/*.json — آمن على Render/VPS لكن يُمسح على Replit
+// إذا كنت على Replit نوصي بنقل LongTermMemory لـ MongoDB لاحقاً
 const fs   = require('fs');
 const path = require('path');
 

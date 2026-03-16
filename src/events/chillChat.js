@@ -5,7 +5,7 @@ const Groq = require("groq-sdk");
 
 const { analyze } = require('../layers/perceptionLayer');
 const { selectResponseStyle, getEvolutionDescription } = require('../layers/personalityEngine');
-const { analyzeChannelDynamics, computeParticipationProbability, buildCrisisResponse } = require('../layers/socialContext');
+const { analyzeChannelDynamics, computeParticipationProbability } = require('../layers/socialContext');
 const { shortTerm, mediumTerm, longTerm } = require('../memory/memorySystem');
 const learningEngine = require('../memory/learningEngine');
 
@@ -20,7 +20,7 @@ const groqApiKey = rawKey.trim();
 // عشان تتأكد بعينك إن البوت شاف المفتاح (رح يطبع أول 4 أحرف بس عشان الأمان)
 console.log("🔑 مفتاح Groq المقروء يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
 
-const client = new Groq({ apiKey: groqApiKey, timeout: 30000 });
+const client = new Groq({ apiKey: groqApiKey, timeout: 45000 });
 
 const CHILL_CHANNEL_KEYWORD = 'chill';
 const MENTION_COOLDOWN_MS   = 1000;
@@ -51,9 +51,6 @@ async function handleChillMessage(message) {
     const hasAdminRights = member ? (isAdmin(member) || isFounder(member)) : false;
     const isMentioned    = /فلاكس|flux/i.test(q) || message.mentions?.has(message.client.user.id);
 
-    if (!isChillChannel) {
-        if (!hasAdminRights || !isMentioned) return;
-    }
 
     const now = Date.now();
     const perception = analyze(q || 'صورة');
@@ -92,39 +89,6 @@ async function handleChillMessage(message) {
     }
 
     if (!shouldReply) return;
-
-    // ─── اعتراض حرج: حالة خطر نفسي — لا نرسل AI أبداً ──────────────────────
-    if (perception.warningFlag) {
-        const crisisMsg = buildCrisisResponse(perception.lang);
-        try {
-            await message.reply(crisisMsg);
-            // تسجيل في الـ mod-log لإعلام الإدارة
-            const { guild } = message;
-            const logChannel = guild.channels.cache.find(
-                c => c.name.toLowerCase().includes('log') && c.isTextBased()
-            );
-            if (logChannel) {
-                const { EmbedBuilder } = require('discord.js');
-                const alertEmbed = new EmbedBuilder()
-                    .setTitle('🚨  تنبيه: إشارة خطر نفسي')
-                    .setDescription(
-                        `العضو ${message.author} أرسل رسالة تحتوي على إشارات خطر.
-
-` +
-                        `**القناة:** ${channel}
-` +
-                        `**الرسالة:** ||${q.slice(0, 200)}||`
-                    )
-                    .setColor(0xff0000)
-                    .setFooter({ text: 'FLUX • IO  |  نظام الأمان النفسي' })
-                    .setTimestamp();
-                await logChannel.send({ embeds: [alertEmbed] }).catch(() => {});
-            }
-        } catch (e) {
-            console.error('[CRISIS] فشل إرسال رسالة الأزمة:', e.message);
-        }
-        return; // لا تكمل للـ AI أبداً
-    }
 
     if (now - (chillCooldown.get(channel.id) || 0) < MENTION_COOLDOWN_MS) return;
     chillCooldown.set(channel.id, now);

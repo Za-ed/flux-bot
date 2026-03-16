@@ -19,7 +19,18 @@ const XP_REWARDS = {
 };
 
 // ─── Active Games Store ───────────────────────────────────────────────────────
-const activeGames = new Map();
+const activeGames  = new Map();
+const MAX_GAMES    = 20; // حد أقصى — يمنع memory leak لو فُتحت قنوات كثيرة
+
+// حارس: لو تجاوز الحد، امسح أقدم لعبة
+function guardGameLimit() {
+    if (activeGames.size < MAX_GAMES) return;
+    const oldestKey = activeGames.keys().next().value;
+    const oldest    = activeGames.get(oldestKey);
+    if (oldest?.timeout) clearTimeout(oldest.timeout);
+    activeGames.delete(oldestKey);
+    console.warn(`[GAMING] ⚠️ تجاوز الحد (${MAX_GAMES}) — مسح أقدم لعبة: ${oldestKey}`);
+}
 
 // ─── Trivia Questions ─────────────────────────────────────────────────────────
 const TRIVIA_QUESTIONS = [
@@ -167,6 +178,7 @@ async function startTrivia(channel) {
     clearGame(channel.id);
     await channel.send(`⏰ انتهى الوقت! الإجابة: **${q.a[0]}**`);
   }, ANSWER_TIMEOUT);
+  guardGameLimit();
   activeGames.set(channel.id, { type: 'trivia', answers: q.a, xp: q.xp, timeout });
 }
 
@@ -185,6 +197,7 @@ async function startMath(channel, difficulty = 'medium') {
     clearGame(channel.id);
     await channel.send(`⏰ انتهى الوقت! الإجابة: **${answer}**`);
   }, 15000);
+  guardGameLimit();
   activeGames.set(channel.id, { type: 'math', answer, xp, timeout });
 }
 
@@ -203,6 +216,7 @@ async function startScramble(channel) {
     clearGame(channel.id);
     await channel.send(`⏰ انتهى الوقت! الكلمة: **${item.word}**`);
   }, 25000);
+  guardGameLimit();
   activeGames.set(channel.id, { type: 'scramble', answer: item.word, xp: XP_REWARDS.scramble, timeout });
 }
 
@@ -217,6 +231,7 @@ async function startBomb(channel) {
     .setColor(0xe74c3c)
     .setFooter({ text: 'من يكتب الرقم الملغوم يخسر!  |  FLUX • IO' });
   await channel.send({ embeds: [embed] });
+  guardGameLimit();
   activeGames.set(channel.id, { type: 'bomb', target, bomb, current: 0, last: null, xp: XP_REWARDS.bomb, timeout: null });
 }
 
@@ -254,6 +269,7 @@ async function startGuessChar(channel) {
     if (game) { clearTimeout(game.timeout); game.timeout = timeout; }
   };
   const timeout = setTimeout(giveNextClue, 30000);
+  guardGameLimit();
   activeGames.set(channel.id, { type: 'character', answers: [char.answer, char.arAnswer], xp: 80, timeout });
 }
 

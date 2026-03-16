@@ -20,7 +20,7 @@ module.exports = {
         const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
         
         // 1. جلب البيانات من الداتابيز (MongoDB)
-        const userData = await getUserData(interaction.guild.id, targetUser.id) || { level: 0, xp: 0, total_xp: 0, voice_xp: 0 };
+        const userData = await getUserData(interaction.guild.id, targetUser.id) || { level: 0, xp: 0, total_xp: 0, voice_xp: 0, msg_count: 0 };
         const rank = await getUserRank(interaction.guild.id, targetUser.id) || 0;
         
         // 2. حساب الـ XP المطلوب للمستوى القادم (هذا يحل مشكلة شريط التقدم)
@@ -37,7 +37,9 @@ module.exports = {
             currentXP: userData.xp || 0,       // نمرر الـ xp الخاص بالمستوى فقط
             xpForNext: xpNext,
             rank: rank,
-            voiceMinutes: userData.voice_xp || 0 // حل مشكلة الفويس (نجلب الدقائق الكلية من الداتابيز)
+            // voice_xp = عدد مرات منح الـ XP الصوتي (كل دقيقة = 1 مرة)
+            // لذلك يساوي تقريباً عدد الدقائق الكلي في الصوت
+            voiceMinutes: userData.voice_xp || 0
         });
 
         // 4. إرفاق الصورة (يجب أن يكون الامتداد .gif لكي تتحرك!)
