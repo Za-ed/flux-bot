@@ -342,13 +342,13 @@ async function generateRankCard({ username, displayName, avatarURL, level, curre
             ctx.textBaseline = 'alphabetic';
             ctx.font         = '9px GeistMono, monospace';
             ctx.fillStyle    = 'rgba(255,255,255,0.45)';
-            ctx.fillText(s.label, SX + SW / 2, sy + 17);
+            ctx.fillText(s.label, SX + SW / 2, sy + 18);
 
             // Value — يقلص تلقائياً لو الرقم كبير
             ctx.fillStyle   = tier.glow;
             ctx.shadowColor = tier.glow;
             ctx.shadowBlur  = 6 * pulse;
-            fillTextFit(ctx, s.value, SX + SW / 2, sy + SH - 14, SW - 8, 'bold 32px Bricolage, Arial, sans-serif');
+            fillTextFit(ctx, s.value, SX + SW / 2, sy + SH - 10, SW - 16, 'bold 26px Bricolage, Arial, sans-serif');
             ctx.restore();
         });
 
