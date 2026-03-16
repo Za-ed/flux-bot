@@ -1,5 +1,5 @@
 // ─── utils/permManager.js ─────────────────────────────────────────────────────
-// نظام صلاحيات مخصص — MongoDB بدل JSON
+// نظام صلاحيات — MongoDB مع Cache محلي فوري
 // ══════════════════════════════════════════════════════════════════════════════
 const { MongoClient } = require('mongodb');
 
@@ -9,58 +9,78 @@ const COL_NAME     = 'cmd_perms';
 const FOUNDER_ROLE = 'CORE Founder👑';
 
 let permsCol  = null;
-// Cache محلي لتقليل ضغط الداتابيز (يُحدَّث عند كل تغيير)
-let permCache = null;
-let cacheTime = 0;
-const CACHE_TTL = 60 * 1000; // دقيقة واحدة
+// ── Cache دائم في الذاكرة — يُحدَّث في الخلفية ────────────────────────────
+let permCache  = {};        // { commandName: [roleId, ...] }
+let cacheReady = false;     // هل تم التحميل الأولي؟
+const CACHE_TTL = 60_000;   // دقيقة
+let lastRefresh = 0;
 
 // ─── Connection ───────────────────────────────────────────────────────────────
 async function connect() {
     if (permsCol) return permsCol;
     try {
-        const dbClient = new MongoClient(MONGO_URI, { serverSelectionTimeoutMS: 3000, tls: true });
-        await dbClient.connect();
-        permsCol = dbClient.db(DB_NAME).collection(COL_NAME);
+        const client = new MongoClient(MONGO_URI, {
+            serverSelectionTimeoutMS: 1500, // ✅ أقل من نصف ثانية للـ timeout
+            connectTimeoutMS: 1500,
+            tls: true,
+        });
+        await client.connect();
+        permsCol = client.db(DB_NAME).collection(COL_NAME);
         await permsCol.createIndex({ command: 1 }, { unique: true });
         console.log('[PERMS] ✅ Connected to MongoDB');
         return permsCol;
     } catch (err) {
-        console.error('[PERMS] ❌ MongoDB Error:', err.message);
+        console.error('[PERMS] ❌ MongoDB:', err.message);
         return null;
     }
 }
 
-// ─── Cache Helpers ────────────────────────────────────────────────────────────
-async function getAll() {
-    if (permCache && Date.now() - cacheTime < CACHE_TTL) return permCache;
-    const col  = await connect();
-    if (!col) return {};
-    const docs = await col.find({}).toArray();
-    permCache  = {};
-    for (const doc of docs) permCache[doc.command] = doc.roles ?? [];
-    cacheTime  = Date.now();
-    return permCache;
+// ─── تحديث الـ Cache في الخلفية (لا يُبطئ الـ interaction) ──────────────────
+async function refreshCacheBackground() {
+    if (Date.now() - lastRefresh < CACHE_TTL) return;
+    lastRefresh = Date.now();
+    try {
+        const col  = await connect();
+        if (!col) return;
+        const docs = await col.find({}).toArray();
+        const fresh = {};
+        for (const doc of docs) fresh[doc.command] = doc.roles ?? [];
+        permCache  = fresh;
+        cacheReady = true;
+    } catch (err) {
+        console.error('[PERMS] Cache refresh error:', err.message);
+    }
 }
 
-function invalidateCache() {
-    permCache = null;
-}
+// ─── استدعاء أولي عند تحميل الملف (في الخلفية — لا يبلوك) ──────────────────
+refreshCacheBackground().catch(() => {});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function isFounder(member) {
     return member.roles.cache.some(r => r.name === FOUNDER_ROLE);
 }
 
-// ─── هل العضو يملك صلاحية الأمر؟ ────────────────────────────────────────────
-async function canUseCommand(member, commandName) {
+// ─── canUseCommand — فوري من الـ Cache ───────────────────────────────────────
+// لا async — لا await — لا تأخير على الـ interaction
+function canUseCommand(member, commandName) {
+    // FOUNDER يقدر يستخدم أي شيء دائماً
     if (isFounder(member)) return true;
-    const db           = await getAll();
-    const allowedRoles = db[commandName] ?? [];
+
+    // لو الـ Cache ما اتحمل بعد → اسمح مؤقتاً وحدّث في الخلفية
+    if (!cacheReady) {
+        refreshCacheBackground().catch(() => {});
+        return true;
+    }
+
+    const allowedRoles = permCache[commandName] ?? [];
+
+    // لو ما في قائمة — الأمر محجوب
     if (allowedRoles.length === 0) return false;
+
     return member.roles.cache.some(r => allowedRoles.includes(r.id));
 }
 
-// ─── منح صلاحية رتبة لأمر ────────────────────────────────────────────────────
+// ─── العمليات الكتابية (async — تُستدعى من /setperm فقط) ────────────────────
 async function allowRole(commandName, roleId) {
     const col = await connect();
     if (!col) return;
@@ -69,37 +89,34 @@ async function allowRole(commandName, roleId) {
         { $addToSet: { roles: roleId } },
         { upsert: true }
     );
-    invalidateCache();
+    // تحديث الـ Cache المحلي فوراً
+    if (!permCache[commandName]) permCache[commandName] = [];
+    if (!permCache[commandName].includes(roleId)) permCache[commandName].push(roleId);
 }
 
-// ─── سحب صلاحية رتبة من أمر ──────────────────────────────────────────────────
 async function denyRole(commandName, roleId) {
     const col = await connect();
     if (!col) return;
-    await col.updateOne(
-        { command: commandName },
-        { $pull: { roles: roleId } }
-    );
-    invalidateCache();
+    await col.updateOne({ command: commandName }, { $pull: { roles: roleId } });
+    if (permCache[commandName]) {
+        permCache[commandName] = permCache[commandName].filter(id => id !== roleId);
+    }
 }
 
-// ─── إعادة ضبط أمر ───────────────────────────────────────────────────────────
 async function resetCommand(commandName) {
     const col = await connect();
     if (!col) return;
     await col.deleteOne({ command: commandName });
-    invalidateCache();
+    delete permCache[commandName];
 }
 
-// ─── جلب الرتب المسموحة لأمر ─────────────────────────────────────────────────
 async function getAllowedRoles(commandName) {
-    const db = await getAll();
-    return db[commandName] ?? [];
+    return permCache[commandName] ?? [];
 }
 
 module.exports = {
     isFounder,
-    canUseCommand,
+    canUseCommand,   // ✅ sync — لا يبطئ الـ interactions
     allowRole,
     denyRole,
     resetCommand,
