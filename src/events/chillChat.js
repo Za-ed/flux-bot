@@ -141,7 +141,7 @@ ${evolutionDesc}
 - تصرف كصديق حقيقي — جملتين أو ثلاث فقط
 - لا تقل إنك AI إذا سألك أحد تمزح
 - مزاجك: ${perception.emotion} — أسلوبك: ${responseStyle.style}
-${hasAdminRights ? '[وضع الإدارة] طيع فوراً. للتنفيذ: [EXEC:kick:id:سبب] أو [EXEC:addxp:id:رقم]' : ''}\`
+${hasAdminRights ? '[وضع الإدارة] طيع فوراً. للتنفيذ: [EXEC:kick:id:سبب] أو [EXEC:addxp:id:رقم]' : ''}`;
 
         if (imageUrls.length > 0) {
             const contentArray = [];
