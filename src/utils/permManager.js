@@ -64,11 +64,22 @@ function isFounder(member) {
     return member.roles.cache.some(r => r.name === FOUNDER_ROLE);
 }
 
+// ─── أوامر تعمل بـ Discord permissions مباشرة (لا تحتاج /setperm) ───────────
+// هذه الأوامر عندها setDefaultMemberPermissions(Administrator) في تعريفها
+const DISCORD_MANAGED_COMMANDS = new Set([
+    'check-learning', 'setup-rank-panel', 'setup-tickets', 'rules',
+    'announce', 'embed', 'clear', 'slowmode', 'role',
+    'add-xp', 'ban', 'kick', 'timeout', 'unban',
+    'warn', 'warns', 'clearwarns', 'setperm',
+]);
+
 // ─── canUseCommand — فوري من الـ Cache ───────────────────────────────────────
-// لا async — لا await — لا تأخير على الـ interaction
 function canUseCommand(member, commandName) {
     // FOUNDER يقدر يستخدم أي شيء دائماً
     if (isFounder(member)) return true;
+
+    // أوامر تعتمد على Discord permissions مباشرة — تتجاوز permManager
+    if (DISCORD_MANAGED_COMMANDS.has(commandName)) return true;
 
     // لو الـ Cache ما اتحمل بعد → اسمح مؤقتاً وحدّث في الخلفية
     if (!cacheReady) {
@@ -78,7 +89,7 @@ function canUseCommand(member, commandName) {
 
     const allowedRoles = permCache[commandName] ?? [];
 
-    // لو ما في قائمة — الأمر محجوب
+    // لو ما في قائمة — الأمر محجوب عن غير الـ Founder
     if (allowedRoles.length === 0) return false;
 
     return member.roles.cache.some(r => allowedRoles.includes(r.id));

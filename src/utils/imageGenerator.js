@@ -104,11 +104,16 @@ async function handleImageGeneration(message) {
 
     // فحص القناة
     const channelName = channel.name?.toLowerCase() || '';
-    const isImageChannel = channelName.includes('imag') || channelName.includes('image');
-    const isAskFlux      = channelName.includes('ask') || channelName.includes('flux');
-    const isChill        = channelName.includes('chill'); // ✅ يشتغل في chill أيضاً
+    // يشتغل في أي قناة تحتوي هذه الكلمات
+    const isAllowedChannel =
+        channelName.includes('imag')  ||
+        channelName.includes('ask')   ||
+        channelName.includes('flux')  ||
+        channelName.includes('chill') ||
+        channelName.includes('bot')   ||
+        channelName.includes('general');
 
-    if (!isImageChannel && !isAskFlux && !isChill) return false;
+    if (!isAllowedChannel) return false;
 
     // فحص إذا كان الطلب للصورة
     if (!isImageRequest(content)) return false;

@@ -6,6 +6,7 @@ const Groq = require("groq-sdk");
 const { analyze } = require('../layers/perceptionLayer');
 const { selectResponseStyle, getEvolutionDescription } = require('../layers/personalityEngine');
 const { analyzeChannelDynamics, computeParticipationProbability, buildCrisisResponse } = require('../layers/socialContext');
+const { handleImageGeneration } = require('../utils/imageGenerator'); // ✅ توليد الصور
 const { shortTerm, mediumTerm, longTerm } = require('../memory/memorySystem');
 const learningEngine = require('../memory/learningEngine');
 
@@ -37,6 +38,14 @@ async function handleChillMessage(message) {
 
     // هسا البوت ما رح يوصل لهون إلا إذا كان فعلاً في قناة Chill
     const q = content?.trim() || '';
+
+    // ── طلب صورة؟ وكّل imageGenerator أولاً ────────────────────────────────
+    try {
+        const wasImage = await handleImageGeneration(message);
+        if (wasImage) return; // معالجة الصورة اكتملت
+    } catch (imgErr) {
+        console.error('[CHILL-IMG]', imgErr.message);
+    }
     
     // ─── استخراج الصور مع دعم Base64 لتخطي حماية ديسكورد ───
     const imageUrls = [];
@@ -132,7 +141,7 @@ ${evolutionDesc}
 - تصرف كصديق حقيقي — جملتين أو ثلاث فقط
 - لا تقل إنك AI إذا سألك أحد تمزح
 - مزاجك: ${perception.emotion} — أسلوبك: ${responseStyle.style}
-${hasAdminRights ? '[وضع الإدارة] طيع فوراً. للتنفيذ: [EXEC:kick:id:سبب] أو [EXEC:addxp:id:رقم]' : ''}`;
+${hasAdminRights ? '[وضع الإدارة] طيع فوراً. للتنفيذ: [EXEC:kick:id:سبب] أو [EXEC:addxp:id:رقم]' : ''}\`
 
         if (imageUrls.length > 0) {
             const contentArray = [];
@@ -185,10 +194,10 @@ ${hasAdminRights ? '[وضع الإدارة] طيع فوراً. للتنفيذ: [
                     const targetMember = await guild.members.fetch(targetId).catch(() => null);
                     if (action === 'kick' && targetMember?.kickable) {
                         await targetMember.kick(param || 'بأمر إداري');
-                        await logAction(guild, { type: 'kick', moderator: author, target: targetMember, reason: param });
+                        if (logAction) await logAction(guild, { type: 'kick', moderator: author, target: targetMember, reason: param });
                     }
                     else if (action === 'addxp') {
-                        await addManualXP(guild.id, targetId, parseInt(param) || 100);
+                        if (addManualXP) await addManualXP(guild.id, targetId, parseInt(param) || 100);
                     }
                 } catch (e) { console.error('[EXEC ERROR]', e.message); }
             }
