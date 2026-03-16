@@ -10,8 +10,8 @@ const { trackMessage }        = require('../utils/dailyReport');
 
 // 2. استدعاء مكتبة Groq وتجهيز المفتاح من المتغيرات المخفية
 // الكود رح يدور على المفتاح بالكابيتال، وإذا ما لقاه رح يدور بالسمول
-const groqApiKey = process.env.GROQ_API_KEY || process.env.Groq_API_KEY;
-
+const rawKey = process.env.GROQ_API_KEY || process.env.Groq_API_KEY || "";
+const groqApiKey = rawKey.trim();
 // عشان تتأكد بعينك إن البوت شاف المفتاح (رح يطبع أول 4 أحرف بس عشان الأمان)
 console.log("🔑 مفتاح Groq المقروء يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
 
