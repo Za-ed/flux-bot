@@ -1,6 +1,5 @@
 // 1. تحميل الإعدادات من ملف .env (لازم يكون أول سطر)
-require('dotenv').config();
-
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const fs   = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');

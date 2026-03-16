@@ -52,8 +52,12 @@ async function refreshCacheBackground() {
     }
 }
 
-// ─── استدعاء أولي عند تحميل الملف (في الخلفية — لا يبلوك) ──────────────────
-refreshCacheBackground().catch(() => {});
+// ─── استدعاء أولي عند تحميل الملف (في الخلفية — بتأخير 3 ثواني) ─────────────
+// التأخير يمنع خطأ MongoDB أثناء deploy-commands.js
+if (process.env.DISCORD_TOKEN) {
+    // فقط لو البوت شغال فعلاً (مش deploy script)
+    setTimeout(() => refreshCacheBackground().catch(() => {}), 3000);
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function isFounder(member) {

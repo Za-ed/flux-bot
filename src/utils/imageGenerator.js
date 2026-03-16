@@ -12,19 +12,26 @@ const groq = new Groq({
 
 // ─── الكلمات المحفِّزة لتوليد الصور ─────────────────────────────────────────
 const IMAGE_TRIGGERS = [
-    // عربي
-    'ارسم', 'ارسم لي', 'رسم', 'صورة', 'صوّر', 'صوّرلي', 'توليد صورة',
-    'اصنع صورة', 'خلق صورة', 'ابتكر صورة', 'generate image', 'بدي صورة',
-    'بدي ارسملي', 'ارسملي', 'رسملي',
+    // عربي — أكثر شمولاً
+    'ارسم', 'رسم لي', 'رسملي', 'ارسم لي', 'ارسملي',
+    'صورة', 'صوّر', 'صوّرلي', 'صورلي', 'صور لي',
+    'توليد صورة', 'ولّد صورة', 'اصنع صورة', 'ابتكر صورة',
+    'بدي صورة', 'بدي ارسم', 'بدي رسم', 'حابب صورة',
+    'خلق صورة', 'اعمللي صورة', 'عمللي صورة',
     // إنجليزي
-    'draw', 'generate', 'create image', 'make image', 'imagine',
-    'paint', 'sketch', 'design', 'illustrate',
+    'draw', 'generate image', 'create image', 'make image',
+    'imagine', 'paint', 'sketch', 'design', 'illustrate',
+    'img:', 'image:', '/imagine',
 ];
 
 // ─── هل الرسالة تطلب صورة؟ ───────────────────────────────────────────────────
 function isImageRequest(content) {
     const lower = content.toLowerCase().trim();
-    return IMAGE_TRIGGERS.some(t => lower.startsWith(t) || lower.includes(t));
+    // تحقق من الـ triggers
+    if (IMAGE_TRIGGERS.some(t => lower.startsWith(t) || lower.includes(t))) return true;
+    // نمط: فعل + وصف (مثل "ارسملي ...")
+    if (/^(ارسم|رسم|صور|صوّر|وليد|ولد)\s*لي?\s*.{3,}/i.test(content)) return true;
+    return false;
 }
 
 // ─── استخراج الوصف من الرسالة ────────────────────────────────────────────────
@@ -97,15 +104,17 @@ async function handleImageGeneration(message) {
 
     // فحص القناة
     const channelName = channel.name?.toLowerCase() || '';
-    const isImageChannel = channelName.includes('imag') || channelName.includes('image-gen');
-    const isAskFlux      = channelName.includes('ask-flux');
+    const isImageChannel = channelName.includes('imag') || channelName.includes('image');
+    const isAskFlux      = channelName.includes('ask') || channelName.includes('flux');
+    const isChill        = channelName.includes('chill'); // ✅ يشتغل في chill أيضاً
 
-    if (!isImageChannel && !isAskFlux) return false;
+    if (!isImageChannel && !isAskFlux && !isChill) return false;
 
     // فحص إذا كان الطلب للصورة
     if (!isImageRequest(content)) return false;
 
     // ── بدء التوليد ──────────────────────────────────────────────────────────
+    console.log(`[IMAGE-GEN] 🎨 طلب صورة من ${author.tag} في #${channel.name}: ${content.slice(0, 60)}`);
     const thinking = await message.reply('🎨 جاري رسم الصورة... قد يأخذ 10-20 ثانية ⏳').catch(() => null);
 
     try {
@@ -119,8 +128,8 @@ async function handleImageGeneration(message) {
 
         // توليد الصورة
         const { attachment, seed } = await generateImage(imagePrompt, {
-            width:  isImageChannel ? 1024 : 768,
-            height: isImageChannel ? 1024 : 768,
+            width:  1024,
+            height: 1024,
             model:  'flux',
         });
 
@@ -131,7 +140,7 @@ async function handleImageGeneration(message) {
             .setImage('attachment://flux_art.png')
             .addFields(
                 { name: '🖌️ الأسلوب',   value: '`Flux — AI Art`', inline: true },
-                { name: '📐 الحجم',      value: isImageChannel ? '`1024×1024`' : '`768×768`', inline: true },
+                { name: '📐 الحجم',      value: '`1024×1024`', inline: true },
                 { name: '🎲 Seed',       value: `\`${seed}\``, inline: true },
             )
             .setColor(0x6c35de)

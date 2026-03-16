@@ -259,14 +259,16 @@ module.exports = {
         const { author, member, channel, content } = message;
 
         try {
-            if (typeof handleCodeRun         === 'function') await handleCodeRun(message);
-            if (typeof handleGamingMessage   === 'function') await handleGamingMessage(message);
-            // ✅ توليد الصور — إذا كانت رسالة لصورة تعالجها وترجع
+            // ✅ توليد الصور أولاً — أعلى أولوية
             if (typeof handleImageGeneration === 'function') {
                 const wasImage = await handleImageGeneration(message);
-                if (wasImage) return;
+                if (wasImage) return; // لو كانت طلب صورة توقف هنا
             }
-        } catch (err) {}
+            if (typeof handleCodeRun       === 'function') await handleCodeRun(message);
+            if (typeof handleGamingMessage === 'function') await handleGamingMessage(message);
+        } catch (err) {
+            console.error('[MESSAGE-CREATE] handler error:', err.message);
+        }
 
         try {
             if (typeof trackMessage === 'function') trackMessage(message.guild.id, author.id);

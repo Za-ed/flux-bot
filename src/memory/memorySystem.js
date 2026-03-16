@@ -8,7 +8,7 @@
 const fs   = require('fs');
 const path = require('path');
 
-const DATA_DIR       = path.join(__dirname, '../../flux_data');
+const DATA_DIR       = path.join(__dirname, '..', '..', 'flux_data'); // → flux-bot/flux_data
 const PROFILES_FILE  = path.join(DATA_DIR, 'user_profiles.json');
 const COMMUNITY_FILE = path.join(DATA_DIR, 'community_state.json');
 

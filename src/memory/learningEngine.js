@@ -8,7 +8,7 @@
 const fs   = require('fs');
 const path = require('path');
 
-const DATA_DIR     = path.join(__dirname, '../../flux_data');
+const DATA_DIR     = path.join(__dirname, '..', '..', 'flux_data'); // → flux-bot/flux_data
 const LEARNING_FILE = path.join(DATA_DIR, 'learning_state.json');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
