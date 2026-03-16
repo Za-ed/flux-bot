@@ -132,8 +132,7 @@ async function getOrCreateThread(message) {
 
 // ─── دالة queryGroq المُصححة ──────────────────────────────────────────────────
 async function queryGroq(userId, userMessage, imageUrls = []) {
-    // استخدام المتغير المخفي مباشرة هنا
-    const client = new Groq({ apiKey: groqApiKey, timeout: 30000 });
+    // ✅ نستخدم الـ client المعرف في الأعلى — لا نُنشئ instance جديد في كل طلب
     const lang   = detectLanguage(userMessage || 'صورة');
 
     if (!conversationHistory.has(userId)) conversationHistory.set(userId, []);
@@ -268,10 +267,20 @@ module.exports = {
         } catch {}
 
         const isCodeRunChannel = channel.name?.toLowerCase().includes(CODE_RUN_CHANNEL_NAME);
-        // هنا كان في خطأ بكودك الأصلي لأنه بوقف الرسالة لو كان فيها رابط وموجودة برا كود رن أو ستاف،
-        // لذلك دمجتها بشكل آمن.
+
+        // ── فلترة الروابط (غير Staff وخارج code-run) ──────────────────────────
         if (/https?:\/\//i.test(content) && !isStaff(member) && !isCodeRunChannel) {
-            // هذا القسم للتعامل مع الروابط. تأكد من إعداداته حسب سياسة سيرفرك.
+            try {
+                await message.delete();
+                const warn = await channel.send(
+                    `⛔ ${author} الروابط ممنوعة هنا. استخدم التذاكر إذا أردت مشاركة رابط.`
+                );
+                setTimeout(() => warn.delete().catch(() => {}), 6000);
+                console.log(`[LINK-FILTER] حُذف رابط من ${author.tag} في #${channel.name}`);
+            } catch (err) {
+                console.error('[LINK-FILTER] فشل الحذف:', err.message);
+            }
+            return;
         }
 
         if (!isStaff(member) && await handleAntiSpam(message)) return;
