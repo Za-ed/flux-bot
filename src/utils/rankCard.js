@@ -121,7 +121,7 @@ async function generateRankCard({ username, displayName, avatarURL, level, curre
     const TX = 230;                          // بداية منطقة النص (بعد الأفاتار)
     const TW = 490;                          // عرض منطقة النص
     const SX = 755;                          // بداية بطاقات الإحصاء
-    const SW = 148, SH = 63;               // أبعاد كل بطاقة
+    const SW = 150, SH = 72;               // أبعاد كل بطاقة — أطول عشان الخط أكبر
 
     // ── ثوابت النص (Y محاور ثابتة ومحسوبة بعناية) ────────────────────────────
     const Y_NAME     = 68;   // اسم المستخدم
@@ -223,7 +223,7 @@ async function generateRankCard({ username, displayName, avatarURL, level, curre
         ctx.shadowColor  = tier.glow;
         ctx.shadowBlur   = 10 * pulse;
         // fillTextFit يقلص الخط لو الاسم طويل
-        fillTextFit(ctx, displayName || username || 'Unknown', TX, Y_NAME, TW - 10, 'bold 34px Bricolage, Arial, sans-serif');
+        fillTextFit(ctx, displayName || username || 'Unknown', TX, Y_NAME, TW - 10, 'bold 30px Bricolage, Arial, sans-serif');
         ctx.restore();
 
         // ══════════════════════════════════════════════════════════════════════
@@ -232,7 +232,7 @@ async function generateRankCard({ username, displayName, avatarURL, level, curre
         ctx.save();
         ctx.textAlign    = 'left';
         ctx.textBaseline = 'alphabetic';  // ← نص عادي
-        ctx.font         = 'bold 12px GeistMono, monospace';
+        ctx.font         = 'bold 11px GeistMono, monospace';
 
         const badgeText = `${tier.label}  ·  LVL.${level}`;
         const badgeW    = Math.min(ctx.measureText(badgeText).width + 24, TW - 10);
@@ -320,7 +320,7 @@ async function generateRankCard({ username, displayName, avatarURL, level, curre
         ];
 
         stats.forEach((s, i) => {
-            const sy = 22 + i * (SH + 6);
+            const sy = 18 + i * (SH + 5);
 
             // خلفية البطاقة
             ctx.save();
@@ -342,13 +342,13 @@ async function generateRankCard({ username, displayName, avatarURL, level, curre
             ctx.textBaseline = 'alphabetic';
             ctx.font         = '9px GeistMono, monospace';
             ctx.fillStyle    = 'rgba(255,255,255,0.45)';
-            ctx.fillText(s.label, SX + SW / 2, sy + 18);
+            ctx.fillText(s.label, SX + SW / 2, sy + 17);
 
             // Value — يقلص تلقائياً لو الرقم كبير
             ctx.fillStyle   = tier.glow;
             ctx.shadowColor = tier.glow;
             ctx.shadowBlur  = 6 * pulse;
-            fillTextFit(ctx, s.value, SX + SW / 2, sy + SH - 10, SW - 16, 'bold 26px Bricolage, Arial, sans-serif');
+            fillTextFit(ctx, s.value, SX + SW / 2, sy + SH - 14, SW - 8, 'bold 32px Bricolage, Arial, sans-serif');
             ctx.restore();
         });
 
