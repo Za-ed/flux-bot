@@ -8,8 +8,13 @@ const { handleGamingMessage } = require('./gamingCorner');
 const { trackMessage }        = require('../utils/dailyReport');
 
 // 2. استدعاء مكتبة Groq وتجهيز المفتاح من المتغيرات المخفية
-const Groq = require('groq-sdk');
-const groqApiKey = process.env.Groq_API_KEY; // تم توحيد الاسم ليتطابق مع باقي الملفات
+// الكود رح يدور على المفتاح بالكابيتال، وإذا ما لقاه رح يدور بالسمول
+const groqApiKey = process.env.GROQ_API_KEY || process.env.Groq_API_KEY;
+
+// عشان تتأكد بعينك إن البوت شاف المفتاح (رح يطبع أول 4 أحرف بس عشان الأمان)
+console.log("🔑 مفتاح Groq المقروء يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
+
+const client = new Groq({ apiKey: groqApiKey, timeout: 30000 });
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const ASK_FLUX_CHANNEL_NAME  = 'ask-flux';

@@ -13,8 +13,12 @@ const { logAction } = require('../utils/modLog');
 const { addManualXP } = require('../utils/xpSystem');
 
 // 2. إعداد مكتبة Groq باستخدام المتغير المخفي
-const Groq = require("groq-sdk");
-const groqApiKey = process.env.Groq_API_KEY; // تم تعديل الاسم ليتطابق مع ما وضعناه في .env
+// الكود رح يدور على المفتاح بالكابيتال، وإذا ما لقاه رح يدور بالسمول
+const groqApiKey = process.env.GROQ_API_KEY || process.env.Groq_API_KEY;
+
+// عشان تتأكد بعينك إن البوت شاف المفتاح (رح يطبع أول 4 أحرف بس عشان الأمان)
+console.log("🔑 مفتاح Groq المقروء يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
+
 const client = new Groq({ apiKey: groqApiKey, timeout: 30000 });
 
 const CHILL_CHANNEL_KEYWORD = 'chill';

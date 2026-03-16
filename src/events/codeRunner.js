@@ -2,10 +2,13 @@
 // نظام تشغيل الكود — قناة code-run
 
 // 1. استدعاء dotenv في أعلى الملف
-require('dotenv').config();
+// الكود رح يدور على المفتاح بالكابيتال، وإذا ما لقاه رح يدور بالسمول
+const groqApiKey = process.env.GROQ_API_KEY || process.env.Groq_API_KEY;
 
-const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
-const Groq = require('groq-sdk');
+// عشان تتأكد بعينك إن البوت شاف المفتاح (رح يطبع أول 4 أحرف بس عشان الأمان)
+console.log("🔑 مفتاح Groq المقروء يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
+
+const client = new Groq({ apiKey: groqApiKey, timeout: 30000 });
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const CODE_CHANNEL   = 'code-run';
