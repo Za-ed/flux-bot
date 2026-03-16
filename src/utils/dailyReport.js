@@ -146,26 +146,41 @@ async function sendDailyReport(guild) {
 }
 
 // ─── جدولة التقرير اليومي ────────────────────────────────────────────────────
+// يُرسل كل يوم الساعة 12:00 AM (منتصف الليل) بتوقيت UTC+3 (الأردن/السعودية)
+const REPORT_HOUR_UTC = 21; // 12:00 AM UTC+3 = 21:00 UTC
+
 function scheduleDailyReport(client) {
-    function msToMidnight() {
-        const now      = new Date();
-        const midnight = new Date(now);
-        midnight.setHours(24, 0, 0, 0);
-        return midnight - now;
+    function msToNextReport() {
+        const now    = new Date();
+        const target = new Date(now);
+
+        // ضبط على الساعة 21:00 UTC (= 12:00 AM بتوقيت UTC+3)
+        target.setUTCHours(REPORT_HOUR_UTC, 0, 0, 0);
+
+        // لو الوقت فات اليوم → نجدول لليوم القادم
+        if (target <= now) {
+            target.setUTCDate(target.getUTCDate() + 1);
+        }
+
+        return target - now;
     }
 
     async function runReport() {
-        console.log('[REPORT] 🕛 إرسال التقرير اليومي...');
+        console.log('[REPORT] 🕛 إرسال التقرير اليومي — 12:00 AM (UTC+3)...');
         for (const guild of client.guilds.cache.values()) {
             await sendDailyReport(guild).catch(err =>
                 console.error(`[REPORT] خطأ في ${guild.name}:`, err.message)
             );
         }
-        setTimeout(runReport, 24 * 60 * 60 * 1000);
+        // جدول للمرة القادمة (بعد 24 ساعة بدقة)
+        setTimeout(runReport, msToNextReport());
     }
 
-    const delay = msToMidnight();
-    console.log(`[REPORT] ⏰ التقرير التالي بعد ${Math.round(delay / 60000)} دقيقة`);
+    const delay = msToNextReport();
+    const mins  = Math.round(delay / 60000);
+    const hrs   = Math.floor(mins / 60);
+    const rem   = mins % 60;
+    console.log(`[REPORT] ⏰ التقرير التالي بعد ${hrs}h ${rem}m (12:00 AM توقيت UTC+3)`);
     setTimeout(runReport, delay);
 }
 
