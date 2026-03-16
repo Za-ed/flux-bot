@@ -8,8 +8,11 @@ const {
     ChannelType,
 } = require('discord.js');
 
-const { handleSuggestVote } = require('../utils/suggestVote');
-const { canUseCommand }     = require('../utils/permManager');
+const { handleSuggestVote }               = require('../utils/suggestVote');
+const { canUseCommand }                   = require('../utils/permManager');
+const { getUserData, getUserRank, xpForLevel } = require('../utils/xpSystem');
+const { generateRankCard }                = require('../utils/rankCard');
+const { AttachmentBuilder }               = require('discord.js');
 const { isAdmin }           = require('../utils/permissions');
 const { logAction }         = require('../utils/modLog');
 
@@ -329,6 +332,111 @@ module.exports = {
                 if (await handleSuggestVote(interaction)) return;
             } catch (err) {
                 console.error('[SUGGEST VOTE ERROR]', err.message);
+            }
+
+            // ── زر بطاقة الرانك ────────────────────────────────────────────────
+            if (customId === 'show_rank_card') {
+                await interaction.deferReply({ flags: 64 }); // ephemeral للمستخدم فقط
+
+                try {
+                    // ── جلب البيانات ──────────────────────────────────────────
+                    const member   = interaction.member;
+                    const userData = await getUserData(guild.id, user.id)
+                        || { level: 0, xp: 0, total_xp: 0, voice_xp: 0 };
+                    const rank     = await getUserRank(guild.id, user.id) || 0;
+
+                    const currentLevel = userData.level  || 0;
+                    const currentXP    = userData.xp     || 0;
+                    const xpNext       = xpForLevel(currentLevel + 1);
+
+                    // ── توليد بطاقة الرانك ────────────────────────────────────
+                    const buffer = await generateRankCard({
+                        username:     user.username,
+                        displayName:  member?.displayName || user.username,
+                        avatarURL:    user.displayAvatarURL({ extension: 'png', size: 256 }),
+                        level:        currentLevel,
+                        currentXP,
+                        xpForNext:    xpNext,
+                        rank,
+                        voiceMinutes: userData.voice_xp || 0,
+                    });
+
+                    const attachment = new AttachmentBuilder(buffer, { name: 'rank.gif' });
+
+                    const rankEmbed = new EmbedBuilder()
+                        .setColor(0x1e90ff)
+                        .setAuthor({
+                            name:    `إحصائيات ${member?.displayName || user.username}`,
+                            iconURL: user.displayAvatarURL(),
+                        })
+                        .setImage('attachment://rank.gif')
+                        .addFields(
+                            { name: '⭐ المستوى',      value: `**${currentLevel}**`,                          inline: true },
+                            { name: '🏅 الرتبة',       value: `**#${rank}**`,                                 inline: true },
+                            { name: '📊 XP الكلي',     value: `**${(userData.total_xp || 0).toLocaleString()}**`, inline: true },
+                        )
+                        .setFooter({ text: `FLUX • IO  |  ${currentXP.toLocaleString()} / ${xpNext.toLocaleString()} XP للمستوى القادم` })
+                        .setTimestamp();
+
+                    // ── إرسال الرد المؤقت للمستخدم ───────────────────────────
+                    await interaction.editReply({
+                        embeds: [rankEmbed],
+                        files:  [attachment],
+                    });
+
+                    // ── فتح ثريد خاص ─────────────────────────────────────────
+                    // نحاول نفتح ثريد في القناة الأصلية
+                    const parentChannel = interaction.channel;
+                    if (parentChannel?.isTextBased() && !parentChannel.isThread()) {
+                        try {
+                            // تحقق لو عنده ثريد مفتوح بالفعل
+                            const existing = parentChannel.threads?.cache.find(
+                                t => t.name === `🏆 ${user.username}` && !t.archived
+                            );
+
+                            const thread = existing ?? await parentChannel.threads.create({
+                                name:                `🏆 ${user.username}`,
+                                autoArchiveDuration: 60,
+                                reason:              `Rank card for ${user.tag}`,
+                            });
+
+                            // أرسل البطاقة داخل الثريد
+                            const threadAttachment = new AttachmentBuilder(buffer, { name: 'rank.gif' });
+                            const threadEmbed = new EmbedBuilder()
+                                .setColor(0x1e90ff)
+                                .setTitle(`🏆  بطاقة ${member?.displayName || user.username}`)
+                                .setImage('attachment://rank.gif')
+                                .addFields(
+                                    { name: '⭐ المستوى',  value: `**${currentLevel}**`,                          inline: true },
+                                    { name: '🏅 الرتبة',   value: `**#${rank}**`,                                 inline: true },
+                                    { name: '📊 XP الكلي', value: `**${(userData.total_xp || 0).toLocaleString()}**`, inline: true },
+                                )
+                                .setFooter({ text: `${currentXP.toLocaleString()} / ${xpNext.toLocaleString()} XP • FLUX IO` })
+                                .setTimestamp();
+
+                            await thread.send({
+                                content: `${user} هذه بطاقة مستواك! 🎉`,
+                                embeds:  [threadEmbed],
+                                files:   [threadAttachment],
+                            });
+
+                            // حذف الثريد تلقائياً بعد دقيقتين
+                            setTimeout(async () => {
+                                await thread.delete('rank card auto-cleanup').catch(() => {});
+                            }, 2 * 60 * 1000);
+
+                        } catch (threadErr) {
+                            console.error('[RANK THREAD]', threadErr.message);
+                        }
+                    }
+
+                } catch (err) {
+                    console.error('[RANK CARD BUTTON]', err.message);
+                    await interaction.editReply({
+                        content: '❌ حصل خطأ أثناء توليد البطاقة، حاول مرة ثانية.',
+                    }).catch(() => {});
+                }
+                return;
             }
 
             // ── موافقة / رفض طلبات الحظر (Moderator → Admin) ──────────────────
