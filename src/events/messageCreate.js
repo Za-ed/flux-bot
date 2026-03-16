@@ -2,6 +2,7 @@
 
 // 1. تحميل الإعدادات من ملف .env (أول سطر دائماً)
 require('dotenv').config();
+const Groq = require("groq-sdk");
 
 const { handleCodeRun }       = require('./codeRunner');
 const { handleGamingMessage } = require('./gamingCorner');

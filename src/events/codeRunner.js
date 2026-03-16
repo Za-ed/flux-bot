@@ -1,23 +1,25 @@
 // ─── events/codeRunner.js ────────────────────────────────────────────────────
 // نظام تشغيل الكود — قناة code-run
 
-// 1. استدعاء dotenv في أعلى الملف
-// الكود رح يدور على المفتاح بالكابيتال، وإذا ما لقاه رح يدور بالسمول
+// 1. استدعاء المكتبات الأساسية (هذول اللي كانوا ناقصين!)
+require('dotenv').config();
+const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const Groq = require('groq-sdk');
+
+// 2. قراءة المفتاح بذكاء (كابيتال أو سمول)
 const groqApiKey = process.env.GROQ_API_KEY || process.env.Groq_API_KEY;
 
-// عشان تتأكد بعينك إن البوت شاف المفتاح (رح يطبع أول 4 أحرف بس عشان الأمان)
-console.log("🔑 مفتاح Groq المقروء يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
+// طباعة للتأكد من قراءة المفتاح
+console.log("🔑 [CodeRunner] مفتاح Groq يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
 
-const client = new Groq({ apiKey: groqApiKey, timeout: 30000 });
+// 3. إعداد Groq مرة واحدة فقط لكل الملف عشان سرعة البوت
+const groqClient = new Groq({ apiKey: groqApiKey, timeout: 30000 });
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const CODE_CHANNEL   = 'code-run';
 const MAX_OUTPUT_LEN = 1800;
 
-// 2. قراءة المفتاح حصراً من ملف .env (تم حذف الكود القديم غير الآمن)
-const GROQ_KEY = process.env.Groq_API_KEY;
-
-// ✅ منع معالجة نفس الرسالة مرتين (يُحل مشكلة الرسائل المتكررة)
+// ✅ منع معالجة نفس الرسالة مرتين
 const processedMessages = new Set();
 
 // ─── اللغات المدعومة ──────────────────────────────────────────────────────────
@@ -56,7 +58,6 @@ function detectLanguage(lang) {
 
 // ─── استخراج الكود ───────────────────────────────────────────────────────────
 function extractCode(content) {
-  // ``` lang \n code ``` — يدعم \r\n و \n
   const multiMatch = content.match(/```(\w*)\r?\n([\s\S]*?)```/);
   if (multiMatch) {
     return {
@@ -64,7 +65,6 @@ function extractCode(content) {
       code: multiMatch[2]?.trim() || '',
     };
   }
-  // `code` — inline
   const inlineMatch = content.match(/^`([^`\n]+)`$/);
   if (inlineMatch) {
     return { lang: null, code: inlineMatch[1].trim() };
@@ -90,10 +90,8 @@ function buildHelpEmbed() {
 
 // ─── Groq: تشغيل الكود ───────────────────────────────────────────────────────
 async function runCodeWithGroq(code, langInfo) {
-  // استخدام المتغير المخفي عند إنشاء عميل Groq
-  const groq = new Groq({ apiKey: GROQ_KEY, timeout: 30000 });
-
-  const completion = await groq.chat.completions.create({
+  // هون شلنا الاستدعاء المكرر واستخدمنا groqClient اللي عرفناه فوق
+  const completion = await groqClient.chat.completions.create({
     model:       'llama-3.3-70b-versatile',
     max_tokens:  800,
     temperature: 0.1,
@@ -159,18 +157,15 @@ async function handleCodeRun(message) {
   if (author.bot) return;
   if (!channel.name.toLowerCase().includes(CODE_CHANNEL)) return;
 
-  // ✅ منع المعالجة المزدوجة
   if (processedMessages.has(msgId)) return;
   processedMessages.add(msgId);
-  setTimeout(() => processedMessages.delete(msgId), 60000); // تنظيف بعد دقيقة
+  setTimeout(() => processedMessages.delete(msgId), 60000);
 
   const trimmed = content.trim();
 
-  // ✅ إصلاح !help — case insensitive + startsWith بدل ===
   const isHelpCmd = /^(!help|!run|\/run|!code)$/i.test(trimmed);
   const extracted  = extractCode(trimmed);
 
-  // ── ما في code block ──────────────────────────────────────────────────────
   if (!extracted) {
     if (isHelpCmd) {
       await channel.send({ embeds: [buildHelpEmbed()] });
@@ -181,7 +176,6 @@ async function handleCodeRun(message) {
   const { lang, code } = extracted;
   if (!code || code.length < 2) return;
 
-  // ── لغة غير محددة أو مجهولة ──────────────────────────────────────────────
   const langInfo = detectLanguage(lang);
   if (!langInfo) {
     await channel.send({
@@ -201,7 +195,6 @@ async function handleCodeRun(message) {
     return;
   }
 
-  // ── تشغيل الكود ───────────────────────────────────────────────────────────
   console.log(`[CODE-RUN] ${author.tag} | ${langInfo.name} | ${code.length} chars`);
 
   let thinkingMsg = null;
@@ -226,7 +219,6 @@ async function handleCodeRun(message) {
       files.push(new AttachmentBuilder(Buffer.from(output, 'utf8'), { name: 'output.txt' }));
     }
 
-    // ✅ edit فقط — بدون أي send ثاني
     await thinkingMsg.edit({ embeds: [embed], files });
     await message.react(isError ? '❌' : '✅').catch(() => {});
 
@@ -240,10 +232,8 @@ async function handleCodeRun(message) {
       .setDescription(`\`\`\`\n${err.message}\n\`\`\``)
       .setColor(0xff4444);
 
-    // ✅ لو thinkingMsg موجود → edit، لو لا → send
     if (thinkingMsg) {
       await thinkingMsg.edit({ embeds: [errEmbed] }).catch(async () => {
-        // لو الـ edit فشل، لا تبعث رسالة جديدة — فقط log
         console.error('[CODE-RUN] thinkingMsg.edit فشل');
       });
     } else {

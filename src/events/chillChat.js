@@ -1,6 +1,7 @@
 // ─── events/chillChat.js ──────────────────────────────────────────────────────
 // 1. تحميل الإعدادات من ملف .env (يجب أن يكون في أعلى الملف)
 require('dotenv').config();
+const Groq = require("groq-sdk");
 
 const { analyze } = require('../layers/perceptionLayer');
 const { selectResponseStyle, getEvolutionDescription } = require('../layers/personalityEngine');
