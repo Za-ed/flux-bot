@@ -7,8 +7,10 @@ const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const Groq = require('groq-sdk');
 
 // 2. قراءة المفتاح بذكاء (كابيتال أو سمول)
-const rawKey = process.env.GROQ_API_KEY || process.env.Groq_API_KEY || "";
-const groqApiKey = rawKey.trim();
+// غيرنا اسم المتغير لـ ZAID_KEY عشان المنصة ما تقدر تقرأ القديم المخفي!
+const groqApiKey = process.env.ZAID_KEY;
+
+console.log("🔑 مفتاح Groq المقروء يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
 // طباعة للتأكد من قراءة المفتاح
 console.log("🔑 [CodeRunner] مفتاح Groq يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
 

@@ -15,8 +15,10 @@ const { addManualXP } = require('../utils/xpSystem');
 
 // 2. إعداد مكتبة Groq باستخدام المتغير المخفي
 // الكود رح يدور على المفتاح بالكابيتال، وإذا ما لقاه رح يدور بالسمول
-const rawKey = process.env.GROQ_API_KEY || process.env.Groq_API_KEY || "";
-const groqApiKey = rawKey.trim();
+// غيرنا اسم المتغير لـ ZAID_KEY عشان المنصة ما تقدر تقرأ القديم المخفي!
+const groqApiKey = process.env.ZAID_KEY;
+
+console.log("🔑 مفتاح Groq المقروء يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
 // عشان تتأكد بعينك إن البوت شاف المفتاح (رح يطبع أول 4 أحرف بس عشان الأمان)
 console.log("🔑 مفتاح Groq المقروء يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
 
