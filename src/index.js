@@ -82,7 +82,16 @@ process.on('uncaughtException', (err) => {
 });
 
 // ─── Login (تشغيل البوت باستخدام التوكن المخفي) ────────────────────────────────
-client.login(process.env.DISCORD_TOKEN).catch((err) => {
-  console.error('[FATAL] Failed to log in:', err.message);
-  process.exit(1);
-});
+console.log("[LOGIN] Attempting to connect to Discord...");
+
+if (!process.env.DISCORD_TOKEN) {
+  console.error("[FATAL ERROR] Token is missing! Check Render Environment Variables.");
+} else {
+  client.login(process.env.DISCORD_TOKEN)
+    .then(() => {
+      console.log("[LOGIN] Successfully sent login request to Discord.");
+    })
+    .catch((err) => {
+      console.error('[FATAL DISCORD ERROR] Failed to log in:', err);
+    });
+}
