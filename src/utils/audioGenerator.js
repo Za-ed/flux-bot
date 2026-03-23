@@ -1,5 +1,5 @@
 // ─── utils/audioGenerator.js ──────────────────────────────────────────────────
-const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+/*const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const Groq = require('groq-sdk');
 
 const groq = new Groq({
@@ -146,4 +146,4 @@ async function handleAudioGeneration(message) {
     }
 }
 
-module.exports = { handleAudioGeneration, isAudioRequest };
+module.exports = { handleAudioGeneration, isAudioRequest };*/

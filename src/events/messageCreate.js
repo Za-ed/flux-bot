@@ -1,17 +1,17 @@
 // ─── events/messageCreate.js ─────────────────────────────────────────────────
 
-// 1. تحميل الإعدادات من ملف .env (أول سطر دائماً)
 require('dotenv').config();
 const Groq = require("groq-sdk");
 
 const { handleCodeRun }         = require('./codeRunner');
 const { handleGamingMessage }   = require('./gamingCorner');
 const { trackMessage }          = require('../utils/dailyReport');
-const { handleImageGeneration } = require('../utils/imageGenerator'); // ✅ توليد الصور
-const { handleAudioGeneration } = require('../utils/audioGenerator');
-const { handleVideoGeneration } = require('../utils/videoGenerator'); // ✅ توليد الفيديو (الجديد)
+const { handleImageGeneration } = require('../utils/imageGenerator'); // ✅ توليد الصور يعمل
 
-// 2. استدعاء مكتبة Groq وتجهيز المفتاح من المتغيرات المخفية
+// ❌ تم إيقاف الفيديو والصوت مؤقتاً (مخبأين كتعليقات لتفعيلهم مستقبلاً)
+// const { handleVideoGeneration } = require('../utils/videoGenerator'); 
+// const { handleAudioGeneration } = require('../utils/audioGenerator'); 
+
 const rawKey = process.env.GROQ_API_KEY || process.env.Groq_API_KEY || "";
 const groqApiKey = rawKey.trim();
 
@@ -31,7 +31,6 @@ const THREAD_INACTIVITY_MS   = 2 * 60 * 1000;
 const CACHE_CLEANUP_MS       = 10 * 60 * 1000;
 const MAX_HISTORY_LENGTH     = 10;
 
-// ─── Stores ───────────────────────────────────────────────────────────────────
 const spamMap             = new Map();
 const conversationHistory = new Map();
 const askFluxCooldowns    = new Map();
@@ -125,15 +124,14 @@ async function getOrCreateThread(message) {
     await thread.send(
         `👋 **أهلاً ${author}!** هذا ثريدك الخاص مع **FLUX AI**.\n\n` +
         `> 💡 اسألني أي شيء — برمجة، معرفة عامة، محادثة عادية.\n` +
-        `> 🖼️ **أرسل أي صورة (كود أو ميمز) وسأقوم بتحليلها فوراً!**\n` +
-        `> 🎬 **اكتب "فيديو" متبوعاً بوصف لإنشاء مقطع مرئي.**\n` +
+        `> 🖼️ **أرسل أي صورة وسأقوم بتحليلها فوراً!**\n` +
+        `> 🎨 **اكتب "ارسم" متبوعاً بوصف لتوليد صورة.**\n` +
         `> ⏰ يُحذف الثريد تلقائياً بعد دقيقتين من عدم النشاط.`
     );
 
     return thread;
 }
 
-// ─── دالة queryGroq المُصححة ──────────────────────────────────────────────────
 async function queryGroq(userId, userMessage, imageUrls = []) {
     const lang   = detectLanguage(userMessage || 'صورة');
 
@@ -145,8 +143,6 @@ async function queryGroq(userId, userMessage, imageUrls = []) {
     const modelToUse = (imageUrls && imageUrls.length > 0) 
         ? 'meta-llama/llama-4-scout-17b-16e-instruct' 
         : 'llama-3.3-70b-versatile';
-
-    console.log("🔍 [DEBUG] الموديل المطلوب في MessageCreate:", modelToUse);
 
     if (imageUrls && imageUrls.length > 0) {
         const contentArray = [];
@@ -188,7 +184,6 @@ async function queryGroq(userId, userMessage, imageUrls = []) {
     return text;
 }
 
-// ─── AI Response Handler ──────────────────────────────────────────────────────
 async function handleAIResponse(userId, question, targetChannel, originalMessage = null, imageUrls = []) {
     let typingInterval = null;
     try {
@@ -220,7 +215,6 @@ async function handleAIResponse(userId, question, targetChannel, originalMessage
     }
 }
 
-// ─── Anti-Spam ────────────────────────────────────────────────────────────────
 async function handleAntiSpam(message) {
     const { author, member, channel } = message;
     const now = Date.now();
@@ -247,7 +241,6 @@ async function handleAntiSpam(message) {
     return false;
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
 module.exports = {
     name: 'messageCreate',
     once: false,
@@ -259,26 +252,24 @@ module.exports = {
         const { author, member, channel, content } = message;
 
         try {
-      // ✅ 1. التحقق من طلبات الفيديو أولاً
-if (typeof handleVideoGeneration === 'function') {
-    const wasVideo = await handleVideoGeneration(message);
-    if (wasVideo) return; 
-}
+            /* ❌ تم إيقاف طلبات الفيديو والصوت
+            if (typeof handleVideoGeneration === 'function') {
+                const wasVideo = await handleVideoGeneration(message);
+                if (wasVideo) return; 
+            }
+            if (typeof handleAudioGeneration === 'function') {
+                const wasAudio = await handleAudioGeneration(message);
+                if (wasAudio) return; 
+            }
+            */
+            
+            // ✅ التحقق من طلبات الصور فقط (التي تعمل بنجاح)
+            if (typeof handleImageGeneration === 'function') {
+                const wasImage = await handleImageGeneration(message);
+                if (wasImage) return; 
+            }
 
-// ✅ 2. التحقق من طلبات الصور
-if (typeof handleImageGeneration === 'function') {
-    const wasImage = await handleImageGeneration(message);
-    if (wasImage) return; 
-}
-
-// ✅ 3. التحقق من طلبات الصوت والموسيقى
-if (typeof handleAudioGeneration === 'function') {
-    const wasAudio = await handleAudioGeneration(message);
-    if (wasAudio) return; 
-}
-            // ✅ 3. الأوامر الأخرى
             if (typeof handleCodeRun       === 'function') await handleCodeRun(message);
-            if (typeof handleAudioGeneration === 'function') await handleAudioGeneration(message);
             if (typeof handleGamingMessage === 'function') await handleGamingMessage(message);
         } catch (err) {
             console.error('[MESSAGE-CREATE] handler error:', err.message);
@@ -290,7 +281,6 @@ if (typeof handleAudioGeneration === 'function') {
 
         const isCodeRunChannel = channel.name?.toLowerCase().includes(CODE_RUN_CHANNEL_NAME);
 
-        // ── فلترة الروابط (غير Staff وخارج code-run) ──────────────────────────
         if (/https?:\/\//i.test(content) && !isStaff(member) && !isCodeRunChannel) {
             try {
                 await message.delete();
@@ -298,16 +288,12 @@ if (typeof handleAudioGeneration === 'function') {
                     `⛔ ${author} الروابط ممنوعة هنا. استخدم التذاكر إذا أردت مشاركة رابط.`
                 );
                 setTimeout(() => warn.delete().catch(() => {}), 6000);
-                console.log(`[LINK-FILTER] حُذف رابط من ${author.tag} في #${channel.name}`);
-            } catch (err) {
-                console.error('[LINK-FILTER] فشل الحذف:', err.message);
-            }
+            } catch (err) {}
             return;
         }
 
         if (!isStaff(member) && await handleAntiSpam(message)) return;
 
-        // 1. استخراج الصور
         let imageUrls = [];
         message.attachments.forEach(att => {
             if (att.url && (att.url.match(/\.(png|jpg|jpeg|gif|webp)/i) || (att.contentType && att.contentType.includes('image')))) {
@@ -315,9 +301,6 @@ if (typeof handleAudioGeneration === 'function') {
             }
         });
 
-        // ════════════════════════════════════════════════════════════════════
-        // ── ثريد AI (داخل الثريد)
-        // ════════════════════════════════════════════════════════════════════
         if (channel.isThread()) {
             if (userThreads.get(author.id) !== channel.id) return;
 
@@ -350,9 +333,6 @@ if (typeof handleAudioGeneration === 'function') {
             return;
         }
 
-        // ════════════════════════════════════════════════════════════════════
-        // ── قناة ask-flux
-        // ════════════════════════════════════════════════════════════════════
         if (channel.name?.toLowerCase().trim() === ASK_FLUX_CHANNEL_NAME) {
             const q = content.trim();
             if (!q && imageUrls.length === 0) return;
@@ -375,9 +355,7 @@ if (typeof handleAudioGeneration === 'function') {
                 usingThread = true;
                 resetThreadTimer(thread, author.id);
                 await message.react('💬').catch(() => {});
-            } catch (threadErr) {
-                console.error("خطأ في إنشاء الثريد:", threadErr.message);
-            }
+            } catch (threadErr) {}
 
             await handleAIResponse(author.id, q, targetChannel, usingThread ? null : message, imageUrls);
         }
