@@ -1,7 +1,4 @@
 // ─── utils/imageGenerator.js ──────────────────────────────────────────────────
-// نظام توليد الصور باستخدام Pollinations AI (مجاني — لا يحتاج API key)
-// يدعم قناتي ask-flux و imag-gen
-// ══════════════════════════════════════════════════════════════════════════════
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const Groq = require('groq-sdk');
 
@@ -10,91 +7,99 @@ const groq = new Groq({
     timeout: 30000,
 });
 
-// ─── الكلمات المحفِّزة لتوليد الصور ─────────────────────────────────────────
+// ─── الكلمات المحفِّزة ────────────────────────────────────────────────────────
 const IMAGE_TRIGGERS = [
-    // عربي — أكثر شمولاً
     'ارسم', 'رسم لي', 'رسملي', 'ارسم لي', 'ارسملي',
     'صورة', 'صوّر', 'صوّرلي', 'صورلي', 'صور لي',
     'توليد صورة', 'ولّد صورة', 'اصنع صورة', 'ابتكر صورة',
     'بدي صورة', 'بدي ارسم', 'بدي رسم', 'حابب صورة',
     'خلق صورة', 'اعمللي صورة', 'عمللي صورة',
-    // إنجليزي
     'draw', 'generate image', 'create image', 'make image',
-    'imagine', 'paint', 'sketch', 'design', 'illustrate',
-    'img:', 'image:', '/imagine',
+    'imagine', 'paint', 'sketch', 'illustrate', 'img:', '/imagine',
 ];
 
-// ─── هل الرسالة تطلب صورة؟ ───────────────────────────────────────────────────
 function isImageRequest(content) {
     const lower = content.toLowerCase().trim();
-    // تحقق من الـ triggers
-    if (IMAGE_TRIGGERS.some(t => lower.startsWith(t) || lower.includes(t))) return true;
-    // نمط: فعل + وصف (مثل "ارسملي ...")
-    if (/^(ارسم|رسم|صور|صوّر|وليد|ولد)\s*لي?\s*.{3,}/i.test(content)) return true;
-    return false;
+    return IMAGE_TRIGGERS.some(t => lower.startsWith(t) || lower.includes(t));
 }
 
-// ─── استخراج الوصف من الرسالة ────────────────────────────────────────────────
-async function extractImagePrompt(userMessage, lang = 'arabic') {
+// ─── تحويل الطلب لـ prompt ────────────────────────────────────────────────────
+async function extractImagePrompt(userMessage) {
     try {
         const completion = await groq.chat.completions.create({
-            model:       'llama-3.3-70b-versatile',
-            max_tokens:  200,
+            model: 'llama-3.3-70b-versatile',
+            max_tokens: 150,
             temperature: 0.3,
             messages: [
                 {
-                    role:    'system',
-                    content: `أنت مساعد يحوّل طلبات المستخدم إلى وصف دقيق للصورة بالإنجليزية فقط.
-قواعد:
-- ترجع وصفاً للصورة بالإنجليزية فقط (لا شرح، لا مقدمة)
-- الوصف يجب أن يكون تفصيلياً واحترافياً
-- اذكر الأسلوب الفني (مثل: digital art, photorealistic, oil painting, anime...)
-- الوصف لا يتجاوز 150 كلمة
-- ممنوع محتوى غير لائق أو عنيف`,
+                    role: 'system',
+                    content: 'Convert the user request to a detailed English image prompt. Return ONLY the prompt, no explanation. Include art style like: digital art, photorealistic, anime, oil painting, etc.',
                 },
-                {
-                    role:    'user',
-                    content: `حوّل هذا الطلب لوصف صورة احترافي: "${userMessage}"`,
-                },
+                { role: 'user', content: userMessage },
             ],
         });
         return completion.choices[0]?.message?.content?.trim() || userMessage;
     } catch {
-        // fallback: نرجع الرسالة كما هي
         return userMessage;
     }
 }
 
-// ─── توليد الصورة عبر Pollinations AI ────────────────────────────────────────
-async function generateImage(prompt, options = {}) {
-    const {
-        width  = 1024,
-        height = 1024,
-        model  = 'flux',    // flux أفضل جودة
-        seed   = Math.floor(Math.random() * 999999),
-    } = options;
+// ─── توليد الصورة مع retry ────────────────────────────────────────────────────
+async function generateImage(prompt, retries = 3) {
+    const seed = Math.floor(Math.random() * 999999);
+    const cleanPrompt = encodeURIComponent(prompt.replace(/['"]/g, '').trim());
 
-    // تنظيف الـ prompt من رموز خاصة
-    const cleanPrompt = encodeURIComponent(
-        prompt.replace(/['"]/g, '').trim()
-    );
+    // قائمة APIs للـ fallback
+    const APIS = [
+        // Pollinations - نموذج flux
+        `https://image.pollinations.ai/prompt/${cleanPrompt}?width=1024&height=1024&model=flux&seed=${seed}&nologo=true&enhance=true`,
+        // Pollinations - نموذج turbo (أسرع)
+        `https://image.pollinations.ai/prompt/${cleanPrompt}?width=1024&height=1024&model=turbo&seed=${seed}&nologo=true`,
+        // Pollinations - بدون خيارات (أبسط)
+        `https://image.pollinations.ai/prompt/${cleanPrompt}?width=768&height=768&seed=${seed}`,
+    ];
 
-    // Pollinations API — مجاني وبدون API key
-    const url = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true&enhance=true`;
+    for (let attempt = 0; attempt < APIS.length; attempt++) {
+        const url = APIS[attempt];
+        try {
+            console.log(`[IMAGE-GEN] محاولة ${attempt + 1}/${APIS.length}...`);
 
-    // جلب الصورة
-    const response = await fetch(url, {
-        headers: { 'User-Agent': 'FLUX-Discord-Bot/1.0' },
-    });
+            const controller = new AbortController();
+            const timeout    = setTimeout(() => controller.abort(), 25000); // 25 ثانية
 
-    if (!response.ok) {
-        throw new Error(`Pollinations API error: ${response.status}`);
+            const response = await fetch(url, {
+                headers: { 'User-Agent': 'Mozilla/5.0 FLUX-Bot/1.0' },
+                signal:  controller.signal,
+            });
+
+            clearTimeout(timeout);
+
+            if (!response.ok) {
+                console.warn(`[IMAGE-GEN] API ${attempt + 1} فشل: ${response.status} - جرب التالي`);
+                continue;
+            }
+
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('image')) {
+                console.warn(`[IMAGE-GEN] API ${attempt + 1} ما أرجع صورة: ${contentType}`);
+                continue;
+            }
+
+            const buffer     = Buffer.from(await response.arrayBuffer());
+            const attachment = new AttachmentBuilder(buffer, { name: 'flux_art.png' });
+
+            console.log(`[IMAGE-GEN] ✅ نجح API ${attempt + 1} — حجم: ${buffer.length} bytes`);
+            return { attachment, seed, apiUsed: attempt + 1 };
+
+        } catch (err) {
+            console.warn(`[IMAGE-GEN] API ${attempt + 1} خطأ: ${err.message}`);
+            if (attempt < APIS.length - 1) {
+                await new Promise(r => setTimeout(r, 1500)); // انتظر 1.5 ثانية
+            }
+        }
     }
 
-    const buffer     = Buffer.from(await response.arrayBuffer());
-    const attachment = new AttachmentBuilder(buffer, { name: 'flux_art.png' });
-
-    return { attachment, url, seed };
+    throw new Error('كل APIs فشلت — جرب مرة ثانية بعد قليل');
 }
 
 // ─── Handler الرئيسي ─────────────────────────────────────────────────────────
@@ -102,51 +107,38 @@ async function handleImageGeneration(message) {
     const { author, channel, content } = message;
     if (author.bot) return false;
 
-    // فحص القناة
     const channelName = channel.name?.toLowerCase() || '';
-    // يشتغل في أي قناة تحتوي هذه الكلمات
-    const isAllowedChannel =
-        channelName.includes('imag')  ||
-        channelName.includes('ask')   ||
-        channelName.includes('flux')  ||
-        channelName.includes('chill') ||
-        channelName.includes('bot')   ||
+    const isAllowed   =
+        channelName.includes('imag') ||
+        channelName.includes('ask')  ||
+        channelName.includes('flux') ||
+        channelName.includes('chill')||
+        channelName.includes('bot')  ||
         channelName.includes('general');
 
-    if (!isAllowedChannel) return false;
-
-    // فحص إذا كان الطلب للصورة
+    if (!isAllowed)              return false;
     if (!isImageRequest(content)) return false;
 
-    // ── بدء التوليد ──────────────────────────────────────────────────────────
-    console.log(`[IMAGE-GEN] 🎨 طلب صورة من ${author.tag} في #${channel.name}: ${content.slice(0, 60)}`);
-    const thinking = await message.reply('🎨 جاري رسم الصورة... قد يأخذ 10-20 ثانية ⏳').catch(() => null);
+    console.log(`[IMAGE-GEN] 🎨 ${author.tag} في #${channel.name}: ${content.slice(0, 60)}`);
+
+    const thinking = await message.reply('🎨 جاري رسم الصورة... ⏳').catch(() => null);
 
     try {
         await channel.sendTyping().catch(() => {});
 
-        // تحويل الطلب لـ prompt احترافي
-        const lang         = /[\u0600-\u06FF]/.test(content) ? 'arabic' : 'english';
-        const imagePrompt  = await extractImagePrompt(content, lang);
+        const imagePrompt = await extractImagePrompt(content);
+        console.log(`[IMAGE-GEN] Prompt: ${imagePrompt.slice(0, 100)}`);
 
-        console.log(`[IMAGE-GEN] ${author.tag}: ${imagePrompt.slice(0, 80)}...`);
+        const { attachment, seed } = await generateImage(imagePrompt);
 
-        // توليد الصورة
-        const { attachment, seed } = await generateImage(imagePrompt, {
-            width:  1024,
-            height: 1024,
-            model:  'flux',
-        });
-
-        // ── بناء الـ Embed ────────────────────────────────────────────────────
         const embed = new EmbedBuilder()
             .setTitle('🎨  FLUX Art Generator')
             .setDescription(`> ${content.slice(0, 200)}`)
             .setImage('attachment://flux_art.png')
             .addFields(
-                { name: '🖌️ الأسلوب',   value: '`Flux — AI Art`', inline: true },
-                { name: '📐 الحجم',      value: '`1024×1024`', inline: true },
-                { name: '🎲 Seed',       value: `\`${seed}\``, inline: true },
+                { name: '🖌️ الأسلوب', value: '`Flux AI Art`',  inline: true },
+                { name: '📐 الحجم',    value: '`1024×1024`',    inline: true },
+                { name: '🎲 Seed',     value: `\`${seed}\``,    inline: true },
             )
             .setColor(0x6c35de)
             .setFooter({
@@ -155,16 +147,16 @@ async function handleImageGeneration(message) {
             })
             .setTimestamp();
 
-        // حذف رسالة "جاري الرسم"
         if (thinking) await thinking.delete().catch(() => {});
-
         await message.reply({ embeds: [embed], files: [attachment] });
         return true;
 
     } catch (err) {
-        console.error('[IMAGE-GEN] Error:', err.message);
+        console.error('[IMAGE-GEN] ❌ نهائي:', err.message);
         if (thinking) {
-            await thinking.edit(`❌ فشل توليد الصورة: \`${err.message}\``).catch(() => {});
+            await thinking.edit(
+                `❌ فشل توليد الصورة: \`${err.message}\`\n💡 جرب مرة ثانية أو غيّر الوصف`
+            ).catch(() => {});
         }
         return true;
     }
