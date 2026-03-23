@@ -7,7 +7,8 @@ function keepAlive() {
 
   app.get('/', (_, res) => res.send('FLUX Bot is Alive and Running! 🚀'));
 
-  app.listen(port, () => {
+  // التعديل هنا: إضافة '0.0.0.0' ليسمح Render بالاتصالات الخارجية
+  app.listen(port, '0.0.0.0', () => {
     console.log(`[WEB] Server running on port ${port}`);
   });
 }
