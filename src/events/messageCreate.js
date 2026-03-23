@@ -8,12 +8,13 @@ const { handleCodeRun }         = require('./codeRunner');
 const { handleGamingMessage }   = require('./gamingCorner');
 const { trackMessage }          = require('../utils/dailyReport');
 const { handleImageGeneration } = require('../utils/imageGenerator'); // ✅ توليد الصور
+const { handleAudioGeneration } = require('../utils/audioGenerator');
+const { handleVideoGeneration } = require('../utils/videoGenerator'); // ✅ توليد الفيديو (الجديد)
 
 // 2. استدعاء مكتبة Groq وتجهيز المفتاح من المتغيرات المخفية
-// الكود رح يدور على المفتاح بالكابيتال، وإذا ما لقاه رح يدور بالسمول
 const rawKey = process.env.GROQ_API_KEY || process.env.Groq_API_KEY || "";
 const groqApiKey = rawKey.trim();
-// عشان تتأكد بعينك إن البوت شاف المفتاح (رح يطبع أول 4 أحرف بس عشان الأمان)
+
 console.log("🔑 مفتاح Groq المقروء يبدأ بـ:", groqApiKey ? groqApiKey.substring(0, 5) + "..." : "غير موجود! ❌");
 
 const client = new Groq({ apiKey: groqApiKey, timeout: 30000 });
@@ -125,6 +126,7 @@ async function getOrCreateThread(message) {
         `👋 **أهلاً ${author}!** هذا ثريدك الخاص مع **FLUX AI**.\n\n` +
         `> 💡 اسألني أي شيء — برمجة، معرفة عامة، محادثة عادية.\n` +
         `> 🖼️ **أرسل أي صورة (كود أو ميمز) وسأقوم بتحليلها فوراً!**\n` +
+        `> 🎬 **اكتب "فيديو" متبوعاً بوصف لإنشاء مقطع مرئي.**\n` +
         `> ⏰ يُحذف الثريد تلقائياً بعد دقيقتين من عدم النشاط.`
     );
 
@@ -133,7 +135,6 @@ async function getOrCreateThread(message) {
 
 // ─── دالة queryGroq المُصححة ──────────────────────────────────────────────────
 async function queryGroq(userId, userMessage, imageUrls = []) {
-    // ✅ نستخدم الـ client المعرف في الأعلى — لا نُنشئ instance جديد في كل طلب
     const lang   = detectLanguage(userMessage || 'صورة');
 
     if (!conversationHistory.has(userId)) conversationHistory.set(userId, []);
@@ -141,7 +142,6 @@ async function queryGroq(userId, userMessage, imageUrls = []) {
 
     let apiMessages = [];
 
-    // التبديل الصارم للموديل (تحديث 2026)
     const modelToUse = (imageUrls && imageUrls.length > 0) 
         ? 'meta-llama/llama-4-scout-17b-16e-instruct' 
         : 'llama-3.3-70b-versatile';
@@ -259,12 +259,26 @@ module.exports = {
         const { author, member, channel, content } = message;
 
         try {
-            // ✅ توليد الصور أولاً — أعلى أولوية
-            if (typeof handleImageGeneration === 'function') {
-                const wasImage = await handleImageGeneration(message);
-                if (wasImage) return; // لو كانت طلب صورة توقف هنا
-            }
+      // ✅ 1. التحقق من طلبات الفيديو أولاً
+if (typeof handleVideoGeneration === 'function') {
+    const wasVideo = await handleVideoGeneration(message);
+    if (wasVideo) return; 
+}
+
+// ✅ 2. التحقق من طلبات الصور
+if (typeof handleImageGeneration === 'function') {
+    const wasImage = await handleImageGeneration(message);
+    if (wasImage) return; 
+}
+
+// ✅ 3. التحقق من طلبات الصوت والموسيقى
+if (typeof handleAudioGeneration === 'function') {
+    const wasAudio = await handleAudioGeneration(message);
+    if (wasAudio) return; 
+}
+            // ✅ 3. الأوامر الأخرى
             if (typeof handleCodeRun       === 'function') await handleCodeRun(message);
+            if (typeof handleAudioGeneration === 'function') await handleAudioGeneration(message);
             if (typeof handleGamingMessage === 'function') await handleGamingMessage(message);
         } catch (err) {
             console.error('[MESSAGE-CREATE] handler error:', err.message);

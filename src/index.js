@@ -1,18 +1,23 @@
-// 1. تحميل الإعدادات من ملف .env (لازم يكون أول سطر)
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+// ─── index.js ─────────────────────────────────────────────────────────────────
+
+// 1. تحميل الإعدادات من ملف .env (أول سطر دائماً)
+require('dotenv').config(); 
+// ملاحظة: إذا كان ملف index.js داخل مجلد src، استخدم السطر الخاص بك القديم:
+// require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+
 const fs   = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const keepAlive = require('./server');
 
-// ─── تشغيل سيرفر الويب ────────────────────────────────────────────────────────
+// ─── تشغيل سيرفر الويب (للحفاظ على البوت يعمل 24/7) ──────────────────────────
 keepAlive();
 
 // ─── تشغيل نظام الـ XP (MongoDB) ─────────────────────────────────────────────
 const { init: initXP } = require('./utils/xpSystem');
 initXP()
-  .then(() => console.log('[XP] Database Connected Successfully'))
-  .catch((err) => console.error('[XP] Init error:', err.message));
+  .then(() => console.log('[XP] Database Connected Successfully ✅'))
+  .catch((err) => console.error('[XP] Init error ❌:', err.message));
 
 // ─── إعداد بوت ديسكورد (Client) ──────────────────────────────────────────────
 const client = new Client({
@@ -31,11 +36,11 @@ const client = new Client({
 client.commands  = new Collection();
 client.cooldowns = new Collection();
 
-// ─── تحميل الأوامر ────────────────────────────────────────────────────────────
+// ─── تحميل الأوامر (Slash Commands) ──────────────────────────────────────────
 const commandsPath = path.join(__dirname, 'commands');
 
 function loadCommands(dir) {
-  if (!fs.existsSync(dir)) return; // عشان ما يضرب الكود إذا المجلد مش موجود
+  if (!fs.existsSync(dir)) return; // تفادي الأخطاء إذا المجلد غير موجود
   const items = fs.readdirSync(dir);
   for (const item of items) {
     const itemPath = path.join(dir, item);
@@ -47,7 +52,7 @@ function loadCommands(dir) {
         client.commands.set(command.data.name, command);
         console.log(`[COMMANDS] Loaded: /${command.data.name}`);
       } else {
-        console.warn(`[WARNING] ${itemPath} missing "data" or "execute"`);
+        console.warn(`[WARNING] The command at ${itemPath} is missing a required "data" or "execute" property.`);
       }
     }
   }
@@ -55,7 +60,7 @@ function loadCommands(dir) {
 
 loadCommands(commandsPath);
 
-// ─── تحميل الأحداث ────────────────────────────────────────────────────────────
+// ─── تحميل الأحداث (Events Handler) ──────────────────────────────────────────
 const eventsPath = path.join(__dirname, 'events');
 if (fs.existsSync(eventsPath)) {
     const eventFiles = fs.readdirSync(eventsPath).filter((f) => f.endsWith('.js'));
@@ -73,25 +78,25 @@ if (fs.existsSync(eventsPath)) {
     }
 }
 
-// ─── Anti-Crash (منع توقف البوت عند الأخطاء) ───────────────────────────────────
+// ─── Anti-Crash (منع توقف البوت عند الأخطاء المفاجئة) ─────────────────────────
 process.on('unhandledRejection', (reason) => {
-  console.error('[ANTI-CRASH] Unhandled Rejection:', reason);
+  console.error('[ANTI-CRASH] Unhandled Rejection ⚠️:', reason);
 });
 process.on('uncaughtException', (err) => {
-  console.error('[ANTI-CRASH] Uncaught Exception:', err);
+  console.error('[ANTI-CRASH] Uncaught Exception ⚠️:', err);
 });
 
-// ─── Login (تشغيل البوت باستخدام التوكن المخفي) ────────────────────────────────
-console.log("[LOGIN] Attempting to connect to Discord...");
+// ─── Login (تسجيل الدخول وتشغيل البوت) ───────────────────────────────────────
+console.log("[LOGIN] Attempting to connect to Discord... ⏳");
 
 if (!process.env.DISCORD_TOKEN) {
-  console.error("[FATAL ERROR] Token is missing! Check Render Environment Variables.");
+  console.error("[FATAL ERROR] Token is missing! Check your .env file or Render Environment Variables. ❌");
 } else {
   client.login(process.env.DISCORD_TOKEN)
     .then(() => {
-      console.log("[LOGIN] Successfully sent login request to Discord.");
+      console.log(`[LOGIN] Successfully logged in as ${client.user?.tag}! 🚀`);
     })
     .catch((err) => {
-      console.error('[FATAL DISCORD ERROR] Failed to log in:', err);
+      console.error('[FATAL DISCORD ERROR] Failed to log in ❌:', err);
     });
 }
