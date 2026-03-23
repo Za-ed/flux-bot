@@ -44,19 +44,23 @@ async function extractImagePrompt(userMessage) {
     }
 }
 
+
 // ─── توليد الصورة مع retry ────────────────────────────────────────────────────
 async function generateImage(prompt, retries = 3) {
     const seed = Math.floor(Math.random() * 999999);
     const cleanPrompt = encodeURIComponent(prompt.replace(/['"]/g, '').trim());
 
-    // قائمة APIs للـ fallback
+    // جلب مفتاح Pollinations من ملف .env (إذا كان موجوداً)
+    const pollinationsKey = process.env.POLLINATIONS_API_KEY || '';
+
+    // قائمة APIs المحدثة بناءً على التوثيق الجديد
     const APIS = [
-        // Pollinations - نموذج flux
-        `https://image.pollinations.ai/prompt/${cleanPrompt}?width=1024&height=1024&model=flux&seed=${seed}&nologo=true&enhance=true`,
+        // Pollinations - نموذج flux 
+        `https://gen.pollinations.ai/image/${cleanPrompt}?width=1024&height=1024&model=flux&seed=${seed}&nologo=true&enhance=true`,
         // Pollinations - نموذج turbo (أسرع)
-        `https://image.pollinations.ai/prompt/${cleanPrompt}?width=1024&height=1024&model=turbo&seed=${seed}&nologo=true`,
+        `https://gen.pollinations.ai/image/${cleanPrompt}?width=1024&height=1024&model=turbo&seed=${seed}&nologo=true`,
         // Pollinations - بدون خيارات (أبسط)
-        `https://image.pollinations.ai/prompt/${cleanPrompt}?width=768&height=768&seed=${seed}`,
+        `https://gen.pollinations.ai/image/${cleanPrompt}?width=768&height=768&seed=${seed}`,
     ];
 
     for (let attempt = 0; attempt < APIS.length; attempt++) {
@@ -67,8 +71,18 @@ async function generateImage(prompt, retries = 3) {
             const controller = new AbortController();
             const timeout    = setTimeout(() => controller.abort(), 25000); // 25 ثانية
 
+            // تجهيز الهيدر (Headers) حسب توصية الموقع المرفق
+            const fetchHeaders = { 
+                'User-Agent': 'Mozilla/5.0 FLUX-Bot/1.0' 
+            };
+            
+            // إضافة مفتاح API إذا قمت بوضعه في ملف .env
+            if (pollinationsKey) {
+                fetchHeaders['Authorization'] = `Bearer ${pollinationsKey}`;
+            }
+
             const response = await fetch(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 FLUX-Bot/1.0' },
+                headers: fetchHeaders,
                 signal:  controller.signal,
             });
 
@@ -99,7 +113,7 @@ async function generateImage(prompt, retries = 3) {
         }
     }
 
-    throw new Error('كل APIs فشلت — جرب مرة ثانية بعد قليل');
+    throw new Error('كل APIs فشلت — تأكد من صحة الرابط أو جرب مرة ثانية بعد قليل');
 }
 
 // ─── Handler الرئيسي ─────────────────────────────────────────────────────────
