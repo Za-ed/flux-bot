@@ -2,13 +2,13 @@
 
 // 1. تحميل الإعدادات من ملف .env (أول سطر دائماً)
 require('dotenv').config(); 
-// ملاحظة: إذا كان ملف index.js داخل مجلد src، استخدم السطر الخاص بك القديم:
-// require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
 const fs   = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
-const keepAlive = require('./server');
+
+// استدعاء ملف السيرفر اللي عملناه
+const keepAlive = require('./server.js');
 
 // ─── تشغيل سيرفر الويب (للحفاظ على البوت يعمل 24/7) ──────────────────────────
 keepAlive();
